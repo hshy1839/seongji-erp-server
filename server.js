@@ -1,4 +1,3 @@
-// index.js
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -7,17 +6,22 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// MongoDB 연결
-mongoose.connect('mongodb://localhost:27017/my_express_db', {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-});
-mongoose.connection.on('connected', () => console.log('MongoDB 연결 완료'));
+const connectDB = require('./src/config/db.config');
+connectDB();
 
-// 예시 라우터
-app.get('/', (req, res) => {
-  res.send('Hello Express!');
-});
+const productRoutes = require('./src/routes/productRoutes');
+const orderRoutes = require('./src/routes/orderRoutes');
+const deliveryRoutes = require('./src/routes/deliveryRoutes');
+const shippingRoutes = require('./src/routes/shippingRoutes');
+const stockRoutes = require('./src/routes/stockRoutes');
+const companyRoutes = require('./src/routes/companyRoutes');
+
+app.use('/api/products', productRoutes);
+app.use('/api/orders', orderRoutes);
+app.use('/api/deliveries', deliveryRoutes);
+app.use('/api/shippings', shippingRoutes);
+app.use('/api/stocks', stockRoutes);
+app.use('/api/companies', companyRoutes);
 
 const PORT = 8864;
 app.listen(PORT, () => {
