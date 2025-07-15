@@ -14,9 +14,9 @@ router.use((req, res, next) => {
 });
 
 router.get('/products', getAllProducts);
-router.get('/products:id', getProductById); 
+router.get('/products/:id', getProductById); 
 router.post('/products', createProduct);
-router.put('/products:id', updateProduct);
-router.delete('/products:id', deleteProduct);
+router.put('/products/:id', updateProduct);
+router.delete('/products/:id', deleteProduct);
 
 module.exports = router;

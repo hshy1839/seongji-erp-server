@@ -1,4 +1,4 @@
-// src/controllers/product.controller.js
+
 const Product = require('../models/Product');
 
 // 전체 제품 목록 조회
