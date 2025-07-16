@@ -8,6 +8,9 @@ const deliverySchema = new mongoose.Schema({
   type: { type: String, enum: ['일반', '사급', '선사급'], default: '일반' },
   status: { type: String, enum: ['WAIT', 'COMPLETE'], default: 'WAIT' },
   remark: { type: String, default: '' },
+
+  deliveryCompany: { type: mongoose.Schema.Types.ObjectId, ref: 'Company' },
+
 }, { timestamps: true });
 
 deliverySchema.index({ deliveryDate: -1 });

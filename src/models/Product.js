@@ -7,7 +7,6 @@ const productSchema = new mongoose.Schema({
   carType: { type: String, default: '' },
   orderCompany: { type: String, default: '' },
   deliveryPlace: { type: String, default: '' },
-  stock: { type: Number, default: 0, min: 0 },
   minStock: { type: Number, default: 0, min: 0 },
   packagingTarget: { type: Boolean, default: false },
   division: { type: String, default: '' },

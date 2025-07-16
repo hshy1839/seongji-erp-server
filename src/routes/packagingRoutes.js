@@ -7,7 +7,7 @@ const {
   createPackaging,
   updatePackaging,
   deletePackaging,
-} = require('../controllers/packaging.controller');
+} = require('../controllers/packagingController');
 
 // 공통 미들웨어 (필요하면)
 router.use((req, res, next) => {
