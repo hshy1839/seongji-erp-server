@@ -3,20 +3,20 @@ const Order = require('../models/Order');
 // 전체 발주 조회
 exports.getAllOrders = async (req, res, next) => {
   try {
-    const orders = await Order.find()
-      .populate('productId', 'name productNumber category')
-      .sort({ orderDate: -1 });
+   const orders = await Order.find()
+  .populate({ path: 'item', strictPopulate: false, select: 'name category productNumber code' })
+  .sort({ orderDate: -1 });
     res.json(orders);
   } catch (err) {
     next(err);
   }
 };
 
+
 // 단일 발주 조회
 exports.getOrderById = async (req, res, next) => {
   try {
-    const order = await Order.findById(req.params.id)
-      .populate('productId', 'name productNumber category');
+    const order = await Order.findById(req.params.id).populate('item');
     if (!order) return res.status(404).json({ message: 'Order not found' });
     res.json(order);
   } catch (err) {
@@ -41,7 +41,7 @@ exports.updateOrder = async (req, res, next) => {
     const updated = await Order.findByIdAndUpdate(req.params.id, req.body, {
       new: true,
       runValidators: true,
-    }).populate('productId', 'name productNumber category');
+    }).populate('item');
     if (!updated) return res.status(404).json({ message: 'Order not found' });
     res.json(updated);
   } catch (err) {

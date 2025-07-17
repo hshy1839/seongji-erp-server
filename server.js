@@ -20,6 +20,7 @@ const shippingRoutes = require('./src/routes/shippingRoutes');
 const stockRoutes = require('./src/routes/stockRoutes');
 const companyRoutes = require('./src/routes/companyRoutes');
 const packagingRoutes = require('./src/routes/packagingRoutes');
+const materialRoutes = require('./src/routes/materialRoutes');
 
 app.use('/api', productRoutes);
 app.use('/api', orderRoutes);
@@ -28,6 +29,7 @@ app.use('/api', shippingRoutes);
 app.use('/api', stockRoutes);
 app.use('/api', companyRoutes);
 app.use('/api', packagingRoutes);
+app.use('/api', materialRoutes);
 
 const PORT = 8864;
 app.listen(PORT, () => {

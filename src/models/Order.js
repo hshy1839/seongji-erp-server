@@ -1,7 +1,16 @@
 const mongoose = require('mongoose');
 
 const orderSchema = new mongoose.Schema({
-  productId: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true },
+  item: {
+    type: mongoose.Schema.Types.ObjectId,
+    required: true,
+    refPath: 'itemType',
+  },
+  itemType: {
+    type: String,
+    required: true,
+    enum: ['Product', 'Material'],
+  },
   orderCompany: { type: String, required: true },
   quantity: { type: Number, required: true, min: 1 },
   orderDate: { type: Date, required: true },
@@ -13,3 +22,4 @@ const orderSchema = new mongoose.Schema({
 orderSchema.index({ orderCompany: 1, orderDate: -1 });
 
 module.exports = mongoose.model('Order', orderSchema);
+
