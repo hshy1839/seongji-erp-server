@@ -4,8 +4,11 @@ const Delivery = require('../models/Delivery');
 exports.getAllDeliveries = async (req, res, next) => {
   try {
     const deliveries = await Delivery.find()
-      .populate('productId', 'name productNumber category')
+      .populate('item') // refPath: 'itemType' 자동 처리
+      .populate('orderId')
+      .populate('deliveryCompany')
       .sort({ deliveryDate: -1 });
+
     res.json(deliveries);
   } catch (err) {
     next(err);
@@ -16,7 +19,10 @@ exports.getAllDeliveries = async (req, res, next) => {
 exports.getDeliveryById = async (req, res, next) => {
   try {
     const delivery = await Delivery.findById(req.params.id)
-      .populate('productId', 'name productNumber category');
+      .populate('item')
+      .populate('orderId')
+      .populate('deliveryCompany');
+
     if (!delivery) return res.status(404).json({ message: 'Delivery not found' });
     res.json(delivery);
   } catch (err) {
@@ -29,19 +35,30 @@ exports.createDelivery = async (req, res, next) => {
   try {
     const delivery = new Delivery(req.body);
     const saved = await delivery.save();
-    res.status(201).json(saved);
+
+    const populated = await Delivery.findById(saved._id)
+      .populate('item')
+      .populate('orderId')
+      .populate('deliveryCompany');
+
+    res.status(201).json(populated);
   } catch (err) {
     next(err);
   }
 };
 
-// 납입 수정 (전체/부분)
+
+// 납입 수정
 exports.updateDelivery = async (req, res, next) => {
   try {
     const updated = await Delivery.findByIdAndUpdate(req.params.id, req.body, {
       new: true,
       runValidators: true,
-    }).populate('productId', 'name productNumber category');
+    })
+      .populate('item')
+      .populate('orderId')
+      .populate('deliveryCompany');
+
     if (!updated) return res.status(404).json({ message: 'Delivery not found' });
     res.json(updated);
   } catch (err) {

@@ -1,10 +1,15 @@
 const mongoose = require('mongoose');
 
 const packagingSchema = new mongoose.Schema({
-  productId: {
+  item: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'Product',
-    required: true
+    required: true,
+    refPath: 'itemType'
+  },
+  itemType: {
+    type: String,
+    required: true,
+    enum: ['Product', 'Material']
   },
 
   packagingDate: {
@@ -29,16 +34,9 @@ const packagingSchema = new mongoose.Schema({
     required: true
   },
 
-  materialId: { // 박스 등 포장재
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Material',
-    required: true
-  },
-
-  packagingType: {
+  registeredBy: { // ✅ 등록자 필드
     type: String,
-    enum: ['일반', '완충', '진공', '기타'],
-    default: '일반'
+    required: true
   },
 
   status: {
@@ -46,6 +44,14 @@ const packagingSchema = new mongoose.Schema({
     enum: ['포장중', '완료', '보류'],
     default: '완료'
   },
+
+  materialsUsed: [ // ✅ 사용된 포장재들
+    {
+      material: { type: mongoose.Schema.Types.ObjectId, ref: 'Material', required: true },
+      quantity: { type: Number, required: true, min: 1 },
+      unit: { type: String, default: 'EA' }
+    }
+  ],
 
   remark: {
     type: String,

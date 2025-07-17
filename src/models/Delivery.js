@@ -1,18 +1,68 @@
+// models/Delivery.js
 const mongoose = require('mongoose');
+const Schema = mongoose.Schema;
 
-const deliverySchema = new mongoose.Schema({
-  orderId: { type: mongoose.Schema.Types.ObjectId, ref: 'Order', required: true },
-  productId: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true },
-  quantity: { type: Number, required: true, min: 1 },
-  deliveryDate: { type: Date, required: true },
-  type: { type: String, enum: ['일반', '사급', '선사급'], default: '일반' },
-  status: { type: String, enum: ['WAIT', 'COMPLETE'], default: 'WAIT' },
-  remark: { type: String, default: '' },
+const deliverySchema = new Schema({
+  orderId: {
+    type: Schema.Types.ObjectId,
+    ref: 'Order',
+    required: true,
+  },
+  item: {
+    type: Schema.Types.ObjectId,
+    required: true,
+  },
+  itemType: {
+    type: String,
+    enum: ['Product', 'Material'],
+    default: 'Product',
+  },
+  quantity: {
+    type: Number,
+    required: true,
+  },
+  deliveryDate: {
+    type: Date,
+    required: true,
+  },
+  deliveryCompany: {
+    type: Schema.Types.ObjectId,
+    ref: 'Company',
+    required: true,
+  },
+  type: {
+    type: String,
+    enum: ['일반', '사급', '선사급'],
+    default: '일반',
+  },
+  remark: {
+    type: String,
+    default: '',
+  },
+  createdBy: {
+    type: String,
+    required: true,
+  },
+  createdAt: {
+    type: Date,
+    default: Date.now,
+  },
+  updatedAt: {
+    type: Date,
+    default: Date.now,
+  },
+});
 
-  deliveryCompany: { type: mongoose.Schema.Types.ObjectId, ref: 'Company' },
+// 저장 전에 updatedAt 자동 갱신
+deliverySchema.pre('save', function (next) {
+  this.updatedAt = new Date();
+  next();
+});
 
-}, { timestamps: true });
-
-deliverySchema.index({ deliveryDate: -1 });
+// findOneAndUpdate나 update 시에도 갱신되게
+deliverySchema.pre('findOneAndUpdate', function (next) {
+  this.set({ updatedAt: new Date() });
+  next();
+});
 
 module.exports = mongoose.model('Delivery', deliverySchema);
