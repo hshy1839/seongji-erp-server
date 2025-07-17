@@ -1,5 +1,6 @@
 
 const Product = require('../models/Product');
+const Stock = require('../models/Stock');
 
 // 전체 제품 목록 조회
 exports.getAllProducts = async (req, res, next) => {
@@ -23,15 +24,30 @@ exports.getProductById = async (req, res, next) => {
 };
 
 // 제품 생성
+// 제품 생성
 exports.createProduct = async (req, res, next) => {
   try {
+    // 1. 제품 저장
     const product = new Product(req.body);
-    const saved = await product.save();
-    res.status(201).json(saved);
+    const savedProduct = await product.save();
+
+    // 2. 해당 제품에 대한 Stock 초기화 등록 (수량: 0)
+    const stock = new Stock({
+      item: savedProduct._id,
+      itemType: 'Product',
+      quantity: 0,
+      location: '',
+      status: '정상',
+      netQuantity: 0,
+    });
+    await stock.save();
+
+    res.status(201).json(savedProduct);
   } catch (error) {
     next(error);
   }
 };
+
 
 // 제품 업데이트 (전체 또는 일부 필드)
 exports.updateProduct = async (req, res, next) => {

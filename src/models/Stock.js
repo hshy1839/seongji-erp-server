@@ -1,10 +1,12 @@
 const mongoose = require('mongoose');
 
 const stockSchema = new mongoose.Schema({
-  productId: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true },
+  item: { type: mongoose.Schema.Types.ObjectId, required: true },
+  itemType: { type: String, enum: ['Product', 'Material'], required: true },
   quantity: { type: Number, default: 0, min: 0 },
-  location: { type: String, default: '' }, // 보관 위치
+  location: { type: String, default: '' },
   status: { type: String, enum: ['정상', '부족'], default: '정상' },
+  netQuantity: { type: Number, default: 0, min: 0 }, // ✅ 총량 필드 추가
   updatedAt: { type: Date, default: Date.now },
 }, { timestamps: true });
 

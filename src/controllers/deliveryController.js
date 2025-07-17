@@ -1,4 +1,5 @@
 const Delivery = require('../models/Delivery');
+const Stock = require('../models/Stock'); // ✅ 추가
 
 // 전체 납입 조회
 exports.getAllDeliveries = async (req, res, next) => {
@@ -30,11 +31,31 @@ exports.getDeliveryById = async (req, res, next) => {
   }
 };
 
-// 납입 생성
+// ✅ 납입 생성 + Stock 자동 처리
+// ✅ 납입 생성 + Stock 자동 처리 (netQuantity까지 포함)
 exports.createDelivery = async (req, res, next) => {
   try {
     const delivery = new Delivery(req.body);
     const saved = await delivery.save();
+
+    const { item, itemType, quantity } = saved;
+
+    if (item && itemType && quantity) {
+      const stock = await Stock.findOne({ item, itemType });
+
+      if (stock) {
+        stock.netQuantity += Number(quantity);       // 총량도 추가
+        stock.updatedAt = new Date();
+        await stock.save();
+      } else {
+        await Stock.create({
+          item,
+          itemType,
+          netQuantity: Number(quantity),             // 새로 생성 시 총량도 시작값 설정
+          location: '', // 기본값
+        });
+      }
+    }
 
     const populated = await Delivery.findById(saved._id)
       .populate('item')
@@ -48,23 +69,38 @@ exports.createDelivery = async (req, res, next) => {
 };
 
 
-// 납입 수정
+// 납입 수정 + Stock 납입합계만 반영
 exports.updateDelivery = async (req, res, next) => {
   try {
+    const prev = await Delivery.findById(req.params.id);
+    if (!prev) return res.status(404).json({ message: 'Delivery not found' });
+
     const updated = await Delivery.findByIdAndUpdate(req.params.id, req.body, {
       new: true,
       runValidators: true,
-    })
-      .populate('item')
-      .populate('orderId')
-      .populate('deliveryCompany');
+    }).populate('item').populate('orderId').populate('deliveryCompany');
 
-    if (!updated) return res.status(404).json({ message: 'Delivery not found' });
+    // ✅ 납입량 변경 → Stock의 netQuantity에만 반영
+    const { item, itemType, quantity } = updated;
+    const prevQty = Number(prev.quantity);
+    const newQty = Number(quantity);
+
+    if (item && itemType && !isNaN(newQty) && !isNaN(prevQty)) {
+      const stock = await Stock.findOne({ item, itemType });
+      if (stock) {
+        const diff = newQty - prevQty;
+        stock.netQuantity = (stock.netQuantity || 0) + diff;
+        stock.updatedAt = new Date();
+        await stock.save();
+      }
+    }
+
     res.json(updated);
   } catch (err) {
     next(err);
   }
 };
+
 
 // 납입 삭제
 exports.deleteDelivery = async (req, res, next) => {
