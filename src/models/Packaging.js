@@ -39,11 +39,7 @@ const packagingSchema = new mongoose.Schema({
     required: true
   },
 
-  status: {
-    type: String,
-    enum: ['포장중', '완료', '보류'],
-    default: '완료'
-  },
+
 
   materialsUsed: [ // ✅ 사용된 포장재들
     {
