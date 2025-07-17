@@ -6,7 +6,6 @@ const shippingSchema = new mongoose.Schema({
   quantity: { type: Number, required: true, min: 1 },
   shippingDate: { type: Date, required: true },
   receiver: { type: String, required: true },
-  status: { type: String, enum: ['WAIT', 'COMPLETE'], default: 'WAIT' },
   remark: { type: String, default: '' },
 }, { timestamps: true });
 
