@@ -32,6 +32,9 @@ app.use('/api', stockRoutes);
 app.use('/api', companyRoutes);
 app.use('/api', packagingRoutes);
 app.use('/api', materialRoutes);
+app.use((req, res) => {
+  res.status(404).json({ message: 'Not Found' });
+});
 
 const PORT = 8864;
 app.listen(PORT, () => {
