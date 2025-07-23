@@ -120,3 +120,64 @@ exports.checkAuth = async (req, res) => {
     res.status(401).json({ message: '인증 실패' });
   }
 };
+
+// 전체 유저 목록 조회 (관리자용)
+exports.getAllUsers = async (req, res) => {
+  try {
+    const users = await User.find().select('-password'); // 비밀번호 제외
+    res.status(200).json(users);
+  } catch (err) {
+    console.error('[GetAllUsers Error]', err);
+    res.status(500).json({ message: '유저 목록 조회 실패' });
+  }
+};
+
+// 특정 유저 정보 조회
+exports.getUserById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const user = await User.findById(id).select('-password');
+    if (!user) return res.status(404).json({ message: '유저를 찾을 수 없습니다.' });
+
+    res.status(200).json(user);
+  } catch (err) {
+    console.error('[GetUserById Error]', err);
+    res.status(500).json({ message: '유저 정보 조회 실패' });
+  }
+};
+
+// 유저 정보 수정
+exports.updateUser = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, email, phone, position, department, userType } = req.body;
+
+    const user = await User.findByIdAndUpdate(
+      id,
+      { name, email, phone, position, department, userType },
+      { new: true }
+    ).select('-password');
+
+    if (!user) return res.status(404).json({ message: '수정할 유저를 찾을 수 없습니다.' });
+
+    res.status(200).json({ message: '유저 정보 수정 완료', user });
+  } catch (err) {
+    console.error('[UpdateUser Error]', err);
+    res.status(500).json({ message: '유저 정보 수정 실패' });
+  }
+};
+
+// 유저 삭제
+exports.deleteUser = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const user = await User.findByIdAndDelete(id);
+    if (!user) return res.status(404).json({ message: '삭제할 유저를 찾을 수 없습니다.' });
+
+    res.status(200).json({ message: '유저 삭제 완료' });
+  } catch (err) {
+    console.error('[DeleteUser Error]', err);
+    res.status(500).json({ message: '유저 삭제 실패' });
+  }
+};

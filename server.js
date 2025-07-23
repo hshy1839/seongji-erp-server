@@ -1,7 +1,7 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
-
+const cookieParser = require('cookie-parser');
 const app = express();
 const allowedOrigins = [
   'http://localhost:3000',
@@ -24,7 +24,7 @@ app.use((req, res, next) => {
   next();
 });
 app.use(express.json());
-
+app.use(cookieParser());
 const connectDB = require('./src/config/db.config');
 connectDB();
 
