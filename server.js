@@ -22,6 +22,8 @@ const companyRoutes = require('./src/routes/companyRoutes');
 const packagingRoutes = require('./src/routes/packagingRoutes');
 const materialRoutes = require('./src/routes/materialRoutes');
 const noticeRoutes = require('./src/routes/noticeRoutes');
+const scheduleRoutes = require('./src/routes/scheduleRoutes');
+
 app.get('/ping', (req, res) => {
   res.status(200).send('pong');
 });
@@ -34,6 +36,7 @@ app.use('/api', companyRoutes);
 app.use('/api', packagingRoutes);
 app.use('/api', materialRoutes);
 app.use('/api', noticeRoutes);
+app.use('/api', scheduleRoutes);
 app.use((req, res) => {
   res.status(404).json({ message: 'Not Found' });
 });
