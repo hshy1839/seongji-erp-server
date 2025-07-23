@@ -10,10 +10,10 @@ const allowedOrigins = [
 
 app.use(cors({
   origin: function (origin, callback) {
-    // 개발 환경에서는 origin이 undefined일 수 있으므로 허용
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
+      console.warn('Blocked by CORS:', origin);
       callback(new Error('Not allowed by CORS'));
     }
   },
