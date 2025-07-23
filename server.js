@@ -3,7 +3,22 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 
 const app = express();
-app.use(cors());
+const allowedOrigins = [
+  'http://localhost:3000',
+  'https://seongji-erp.onrender.com',
+];
+
+app.use(cors({
+  origin: function (origin, callback) {
+    // 개발 환경에서는 origin이 undefined일 수 있으므로 허용
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+}));
 app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl} - IP: ${req.ip}`);
   next();
@@ -23,6 +38,7 @@ const packagingRoutes = require('./src/routes/packagingRoutes');
 const materialRoutes = require('./src/routes/materialRoutes');
 const noticeRoutes = require('./src/routes/noticeRoutes');
 const scheduleRoutes = require('./src/routes/scheduleRoutes');
+const userRoutes = require('./src/routes/userRoutes');
 
 app.get('/ping', (req, res) => {
   res.status(200).send('pong');
@@ -37,6 +53,7 @@ app.use('/api', packagingRoutes);
 app.use('/api', materialRoutes);
 app.use('/api', noticeRoutes);
 app.use('/api', scheduleRoutes);
+app.use('/api/users', userRoutes);
 app.use((req, res) => {
   res.status(404).json({ message: 'Not Found' });
 });
