@@ -27,6 +27,11 @@ exports.getShippingById = async (req, res, next) => {
 // 납품 생성
 exports.createShipping = async (req, res, next) => {
   try {
+    const data = {
+      ...req.body,
+      quantity: Number(req.body.quantity),
+      unitPrice: Number(req.body.unitPrice), // ✅ 여기!
+    };
     const shipping = new Shipping(req.body);
     const saved = await shipping.save();
     res.status(201).json(saved);
