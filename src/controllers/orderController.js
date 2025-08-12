@@ -1,4 +1,9 @@
 const Order = require('../models/Order');
+const XLSX = require('xlsx');
+const Product = require('../models/Product');
+const Material = require('../models/Material');
+const { parseAndInsertOrdersFromExcel } = require('../middlewares/orderExcelService');
+
 
 // 전체 발주 조회
 exports.getAllOrders = async (req, res, next) => {
@@ -57,5 +62,24 @@ exports.deleteOrder = async (req, res, next) => {
     res.json({ message: 'Order deleted' });
   } catch (err) {
     next(err);
+  }
+};
+
+
+exports.uploadOrdersExcelController = async (req, res) => {
+  try {
+    if (!req.file?.buffer) {
+      return res.status(400).json({ ok: false, message: '파일이 없습니다.' });
+    }
+
+    // ?dryRun=true 로 미리 검증만 가능
+    const dryRun = String(req.query.dryRun || 'false').toLowerCase() === 'true';
+
+    const result = await parseAndInsertOrdersFromExcel(req.file.buffer, { dryRun });
+
+    return res.json({ ok: true, dryRun, ...result });
+  } catch (err) {
+    console.error('uploadOrdersExcelController error:', err);
+    return res.status(500).json({ ok: false, message: err.message || '서버 오류' });
   }
 };

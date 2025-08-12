@@ -76,13 +76,14 @@ exports.login = async (req, res) => {
       { expiresIn: TOKEN_EXPIRY }
     );
 
-    // 보안 쿠키로 저장
-    res.cookie('token', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'none',
-      maxAge: 1000 * 60 * 60 * 2, // 2시간
-    });
+   const isProd = process.env.NODE_ENV === 'production';
+
+res.cookie('token', token, {
+  httpOnly: true,
+  secure: isProd,                  // 배포에서는 true, 로컬에서는 false
+  sameSite: isProd ? 'none' : 'lax', // 배포에서는 none, 로컬에서는 lax
+  maxAge: 1000 * 60 * 60 * 2,       // 2시간
+});
 
     res.status(200).json({
       message: '로그인 성공',
