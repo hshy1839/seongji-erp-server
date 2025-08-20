@@ -1,7 +1,7 @@
-// services/orderExcelService.js
+// services/deliveryExcelService.js
 const XLSX = require('xlsx');
 const mongoose = require('mongoose');
-const Order = require('../models/Order');
+const Delivery = require('../models/Delivery'); // ← 이미 있는 Delivery 모델을 사용(스키마는 프로젝트 기준)
 
 // ===== utils =====
 const s = v => (v === undefined || v === null ? '' : String(v).trim());
@@ -29,17 +29,18 @@ const d = v => {
 };
 
 // ===== header aliases =====
+// 프로젝트 컬럼명에 맞춰 자유롭게 추가/수정 가능
 const HEADER_ALIASES = {
-  orderCompany: ['발주처','주문처','거래처','발주회사','ordercompany','company'],
-  orderDate:    ['발주일','주문일','일자','date','orderdate','납품일자','납입일','납입일자'],
-  quantity:     ['수량','발주수량','총발주수량','qty','quantity','총수량'],
-  itemCode:     ['품번','코드','품목코드','productcode','code','partnumber','oem','oemcode'],
-  itemName:     ['품명','품목명','제품명','자재명','item','itemname','name'],
-  category:     ['대분류','카테고리','분류','category'],
-  requester:    ['요청자','담당자','requester'],
-  status:       ['상태','status'],
-  remark:       ['비고','메모','remark'],
-  itemType:     ['품목유형','itemtype','itemType','type','공정'], // ← 있으면 그대로 저장
+  deliveryCompany: ['납품처','납입처','거래처','납품회사','deliverycompany','company'],
+  deliveryDate:    ['납품일','납입일','일자','date','deliverydate'],
+  quantity:        ['수량','납품수량','납입수량','qty','quantity','총수량'],
+  itemCode:        ['품번','코드','품목코드','productcode','code','partnumber','oem','oemcode'],
+  itemName:        ['품명','품목명','제품명','자재명','item','itemname','name'],
+  category:        ['대분류','카테고리','분류','category'],
+  requester:       ['요청자','담당자','requester','입고담당','수령자'],
+  status:          ['상태','status'],
+  remark:          ['비고','메모','remark','note'],
+  itemType:        ['품목유형','itemtype','itemType','type','공정'],
 };
 
 // ===== status map =====
@@ -47,7 +48,7 @@ const mapStatus = v => (/(완료|complete)/i.test(s(v)) ? 'COMPLETE' : 'WAIT');
 
 // ===== sheet pick =====
 function pickSheet(workbook) {
-  const prefer = ['총발주수량', '발주', 'orders'];
+  const prefer = ['납입', '납품', 'deliveries'];
   for (const name of prefer) {
     if (workbook.Sheets[name]) return workbook.Sheets[name];
   }
@@ -56,7 +57,7 @@ function pickSheet(workbook) {
 
 // ===== header row detection & index =====
 function findHeaderRow(rows) {
-  const must = ['orderCompany','orderDate','quantity'];
+  const must = ['deliveryCompany','deliveryDate','quantity'];
   const maxScan = Math.min(rows.length, 20);
   for (let r = 0; r < maxScan; r++) {
     const header = (rows[r] || []).map(h => norm(h));
@@ -79,7 +80,7 @@ function buildHeaderIndex(headerRow) {
 // ===== debug header =====
 function debugHeaderInfo({ rows, headerRowIdx, headerRaw, headerNorm, H, aliases }) {
   const lines = [];
-  lines.push('=== [Excel Header Debug] =================================');
+  lines.push('=== [Excel Header Debug - Deliveries] =====================');
   lines.push(`- headerRowIdx: ${headerRowIdx}`);
   lines.push(`- headerRaw   : ${JSON.stringify(headerRaw)}`);
   lines.push(`- headerNorm  : ${JSON.stringify(headerNorm)}`);
@@ -89,9 +90,9 @@ function debugHeaderInfo({ rows, headerRowIdx, headerRaw, headerNorm, H, aliases
     if (foundIndex !== undefined) {
       const matchedAlias =
         aliasList.find(a => headerNorm.includes(norm(a))) || '(norm-match)';
-      lines.push(`  · ${key.padEnd(12)}: ${String(foundIndex).padStart(2)} / "${matchedAlias}"`);
+      lines.push(`  · ${key.padEnd(16)}: ${String(foundIndex).padStart(2)} / "${matchedAlias}"`);
     } else {
-      lines.push(`  · ${key.padEnd(12)}: (NOT FOUND)  tried=${JSON.stringify(aliasList)}`);
+      lines.push(`  · ${key.padEnd(16)}: (NOT FOUND)  tried=${JSON.stringify(aliasList)}`);
     }
   });
   const preview = rows.slice(headerRowIdx + 1, headerRowIdx + 4).map(r => (r || []).map(s));
@@ -101,32 +102,28 @@ function debugHeaderInfo({ rows, headerRowIdx, headerRaw, headerNorm, H, aliases
   return lines.join('\n');
 }
 
-// ===== createdAt 기준 "업로드 일자" 범위 (기본: KST, UTC+9) =====
-// tzOffsetMin: 분 단위 오프셋(예: KST=+540)
+// ===== createdAt 기준 "업로드 일자"(KST) 범위 계산 =====
 function getUploadDayRangeUTC(now = new Date(), tzOffsetMin = 540) {
   const offsetMs = tzOffsetMin * 60 * 1000;
-  // 로컬(=타깃 타임존) 기준 하루 시작
   const localNow = new Date(now.getTime() + offsetMs);
   const y = localNow.getUTCFullYear();
   const m = localNow.getUTCMonth();
   const ddd = localNow.getUTCDate();
-  // 다시 UTC로 환산(오프셋 되돌림)
-  const startLocal = Date.UTC(y, m, ddd);           // local 00:00:00
-  const startUTC = new Date(startLocal - offsetMs); // 해당 로컬 날의 UTC 시작
+  const startLocal = Date.UTC(y, m, ddd);
+  const startUTC = new Date(startLocal - offsetMs);
   const endUTC = new Date(startUTC.getTime() + 24 * 60 * 60 * 1000);
   const key = `${y}-${String(m + 1).padStart(2, '0')}-${String(ddd).padStart(2, '0')}`;
   return { startUTC, endUTC, key };
 }
 
-// ===== main =====
 /**
- * 엑셀 업로드 정책:
- * - 현재 업로드 시각의 "업로드 일자"(기본: KST)와 DB의 createdAt이 같은 날인 레코드가 있으면 → 그 날 전체를 삭제하고 새 데이터로 교체(덮어쓰기)
+ * 납품 엑셀 업로드 정책:
+ * - 현재 업로드 시각의 "업로드 일자"(기본: KST)와 DB의 createdAt이 같은 날인 레코드가 있으면 → 그 날 전체를 삭제 후 새 데이터로 교체
  * - createdAt이 다른 날만 DB에 있으면 → 그대로 추가
  */
-exports.parseAndInsertOrdersFromExcel = async (
+exports.parseAndInsertDeliveriesFromExcel = async (
   fileBuffer,
-  { dryRun = false, tzOffsetMin = 540 } = {} // 기본 KST
+  { dryRun = false, tzOffsetMin = 540 } = {}
 ) => {
   const wb = XLSX.read(fileBuffer, { type: 'buffer' });
   const ws = pickSheet(wb);
@@ -142,7 +139,7 @@ exports.parseAndInsertOrdersFromExcel = async (
   const start = headerRowIdx + 1;
 
   // required headers
-  const need = ['orderCompany','orderDate','quantity'];
+  const need = ['deliveryCompany','deliveryDate','quantity'];
   const missing = need.filter(k => H[k] === undefined);
   if (missing.length) {
     console.error(
@@ -161,7 +158,7 @@ exports.parseAndInsertOrdersFromExcel = async (
     errors: [],
     insertedIds: [],
     overwriteByCreatedAtDay: false,
-    overwriteDayKey: null, // YYYY-MM-DD (타깃 타임존 기준)
+    overwriteDayKey: null,
   };
 
   for (let r = start; r < rows.length; r++) {
@@ -169,10 +166,10 @@ exports.parseAndInsertOrdersFromExcel = async (
     if (!row || row.every(v => v === undefined || v === null || String(v).trim() === '')) continue;
 
     try {
-      const orderCompany = s(row[H.orderCompany]);
-      const requester    = H.requester !== undefined ? s(row[H.requester]) : '';
-      const orderDate    = d(row[H.orderDate]);
-      const quantity     = n(row[H.quantity]);
+      const deliveryCompany = s(row[H.deliveryCompany]);
+      const requester       = H.requester !== undefined ? s(row[H.requester]) : '';
+      const deliveryDate    = d(row[H.deliveryDate]);
+      const quantity        = n(row[H.quantity]);
 
       const itemCode = H.itemCode !== undefined ? s(row[H.itemCode]) : '';
       const itemName = H.itemName !== undefined ? s(row[H.itemName]) : '';
@@ -183,22 +180,30 @@ exports.parseAndInsertOrdersFromExcel = async (
 
       // validations
       if (!itemName && !itemCode) throw new Error('품명(itemName) 또는 품번(itemCode) 필요');
-      if (!orderCompany) throw new Error('발주처(orderCompany) 없음');
-      if (!orderDate)    throw new Error('발주일(orderDate) 파싱 실패');
+      if (!deliveryCompany) throw new Error('납품처(deliveryCompany) 없음');
+      if (!deliveryDate)    throw new Error('납품일(deliveryDate) 파싱 실패');
       if (!quantity || quantity <= 0) throw new Error('수량(quantity) 파싱 실패');
 
+      // 프로젝트의 Delivery 스키마에 맞춰 필드명 매핑
+      // 예시 스키마 가정:
+      // {
+      //   itemName, itemCode, category, itemType,
+      //   deliveryCompany, quantity, deliveryDate,
+      //   requester, status, remark,
+      //   item: ObjectId (레거시 참조 null)
+      // }
       docs.push({
         itemName,
         itemCode,
         category,
-        itemType,               // 엑셀 값 그대로
-        orderCompany,
+        itemType,
+        deliveryCompany,
         quantity,
-        orderDate,              // 원본 발주일(UTC 자정 정규화됨)
+        deliveryDate,
         requester: requester || '미지정',
         status,
         remark,
-        item: null,             // 레거시 참조 비움
+        item: null,
       });
 
       results.success += 1;
@@ -216,25 +221,23 @@ exports.parseAndInsertOrdersFromExcel = async (
   const { startUTC, endUTC, key } = getUploadDayRangeUTC(new Date(), tzOffsetMin);
   results.overwriteDayKey = key;
 
-  // 트랜잭션
   const session = dryRun ? null : await mongoose.startSession();
   if (session) session.startTransaction();
 
   try {
     if (!dryRun) {
       // 같은 createdAt-일자 데이터가 있다면 삭제(덮어쓰기)
-      const existingCount = await Order.countDocuments(
+      const existingCount = await Delivery.countDocuments(
         { createdAt: { $gte: startUTC, $lt: endUTC } },
         { session }
       );
 
       if (existingCount > 0) {
-        await Order.deleteMany({ createdAt: { $gte: startUTC, $lt: endUTC } }, { session });
+        await Delivery.deleteMany({ createdAt: { $gte: startUTC, $lt: endUTC } }, { session });
         results.overwriteByCreatedAtDay = true;
       }
 
-      // 새 데이터 삽입 (timestamps:true로 createdAt이 자동 기록됨)
-      const created = await Order.insertMany(docs, { session });
+      const created = await Delivery.insertMany(docs, { session });
       results.insertedIds = created.map(d => d._id);
     }
 

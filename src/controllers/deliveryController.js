@@ -1,6 +1,9 @@
 const Delivery = require('../models/Delivery');
 const Stock = require('../models/Stock'); // ✅ 추가
 
+const { parseAndInsertDeliveriesFromExcel } = require('../middlewares/deliveryExcelService');
+
+
 // 전체 납입 조회
 exports.getAllDeliveries = async (req, res, next) => {
   try {
@@ -110,5 +113,28 @@ exports.deleteDelivery = async (req, res, next) => {
     res.json({ message: 'Delivery deleted' });
   } catch (err) {
     next(err);
+  }
+};
+
+// ✅ 엑셀 업로드 (DryRun 지원, 업로드 일자(KST 기본) 동일분 삭제 후 교체 정책)
+exports.uploadDeliveriesExcel = async (req, res, next) => {
+  try {
+    // multer.single('file') 를 라우트에서 사용한다고 가정
+    if (!req.file || !req.file.buffer) {
+      return res.status(400).json({ ok: false, error: '파일이 없습니다.' });
+    }
+
+    const dryRun = String(req.query.dryRun || 'false').toLowerCase() === 'true';
+    const tzOffsetMin = req.query.tzOffsetMin ? Number(req.query.tzOffsetMin) : 540; // 기본: KST(+9h)
+
+    const result = await parseAndInsertDeliveriesFromExcel(req.file.buffer, {
+      dryRun,
+      tzOffsetMin,
+    });
+
+    return res.json({ ok: true, dryRun, ...result });
+  } catch (err) {
+    console.error('[deliveries:upload-excel] ', err);
+    return next(err);
   }
 };

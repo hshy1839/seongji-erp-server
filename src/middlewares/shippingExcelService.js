@@ -1,11 +1,11 @@
-// services/orderExcelService.js
 const XLSX = require('xlsx');
 const mongoose = require('mongoose');
-const Order = require('../models/Order');
+const Shipping = require('../models/Shipping');
 
 // ===== utils =====
 const s = v => (v === undefined || v === null ? '' : String(v).trim());
-const norm = v => s(v).replace(/\s+/g, '').replace(/[()]/g, '').toLowerCase();
+const norm = v => (v === undefined || v === null) ? '' :
+  String(v).trim().replace(/\s+/g, '').replace(/[()]/g, '').toLowerCase();
 
 const n = v => {
   if (v === undefined || v === null || v === '') return null;
@@ -30,9 +30,9 @@ const d = v => {
 
 // ===== header aliases =====
 const HEADER_ALIASES = {
-  orderCompany: ['발주처','주문처','거래처','발주회사','ordercompany','company'],
-  orderDate:    ['발주일','주문일','일자','date','orderdate','납품일자','납입일','납입일자'],
-  quantity:     ['수량','발주수량','총발주수량','qty','quantity','총수량'],
+  shippingCompany: ['납품처','출하처','거래처','납품회사','shippingcompany','출하회사'],
+  shippingDate:    ['주문일','일자','출하일','출하일자','납품일자','납품일','납입일자'],
+  quantity:     ['수량','납품수량','총납품수량','출하량','총출하량','총수량'],
   itemCode:     ['품번','코드','품목코드','productcode','code','partnumber','oem','oemcode'],
   itemName:     ['품명','품목명','제품명','자재명','item','itemname','name'],
   category:     ['대분류','카테고리','분류','category'],
@@ -47,7 +47,7 @@ const mapStatus = v => (/(완료|complete)/i.test(s(v)) ? 'COMPLETE' : 'WAIT');
 
 // ===== sheet pick =====
 function pickSheet(workbook) {
-  const prefer = ['총발주수량', '발주', 'orders'];
+  const prefer = ['총납품수량', '납품', 'shipping'];
   for (const name of prefer) {
     if (workbook.Sheets[name]) return workbook.Sheets[name];
   }
@@ -56,11 +56,13 @@ function pickSheet(workbook) {
 
 // ===== header row detection & index =====
 function findHeaderRow(rows) {
-  const must = ['orderCompany','orderDate','quantity'];
+  const must = ['shippingCompany','shippingDate','quantity'];
   const maxScan = Math.min(rows.length, 20);
   for (let r = 0; r < maxScan; r++) {
-    const header = (rows[r] || []).map(h => norm(h));
-    const hit = must.filter(k => HEADER_ALIASES[k].some(a => header.includes(norm(a))));
+    const header = (rows[r] || []).map(h => norm(h)); // norm이 이미 ''로 정규화
+    const hit = must.filter(k =>
+      (HEADER_ALIASES[k] || []).some(a => header.includes(norm(a)))
+    );
     if (hit.length >= 2) return r;
   }
   return 0;
@@ -68,14 +70,16 @@ function findHeaderRow(rows) {
 
 function buildHeaderIndex(headerRow) {
   const idx = {};
-  const headerNorm = headerRow.map(norm);
-  Object.entries(HEADER_ALIASES).forEach(([key, aliases]) => {
-    const found = headerNorm.findIndex(h => aliases.some(lbl => h.includes(norm(lbl))));
+  // 혹시라도 headerRow가 희소 배열이면 빈칸을 ''로 보정
+  const headerNorm = (headerRow || []).map(h => norm(h));
+  Object.entries(HEADER_ALIASES).forEach(([key, aliases = []]) => {
+    const found = headerNorm.findIndex(h =>
+      aliases.some(lbl => ((h || '').includes(norm(lbl))))
+    );
     if (found >= 0) idx[key] = found;
   });
   return idx;
 }
-
 // ===== debug header =====
 function debugHeaderInfo({ rows, headerRowIdx, headerRaw, headerNorm, H, aliases }) {
   const lines = [];
@@ -124,7 +128,7 @@ function getUploadDayRangeUTC(now = new Date(), tzOffsetMin = 540) {
  * - 현재 업로드 시각의 "업로드 일자"(기본: KST)와 DB의 createdAt이 같은 날인 레코드가 있으면 → 그 날 전체를 삭제하고 새 데이터로 교체(덮어쓰기)
  * - createdAt이 다른 날만 DB에 있으면 → 그대로 추가
  */
-exports.parseAndInsertOrdersFromExcel = async (
+exports.parseAndInsertShippingsFromExcel = async (
   fileBuffer,
   { dryRun = false, tzOffsetMin = 540 } = {} // 기본 KST
 ) => {
@@ -142,7 +146,7 @@ exports.parseAndInsertOrdersFromExcel = async (
   const start = headerRowIdx + 1;
 
   // required headers
-  const need = ['orderCompany','orderDate','quantity'];
+  const need = ['shippingCompany','shippingDate','quantity'];
   const missing = need.filter(k => H[k] === undefined);
   if (missing.length) {
     console.error(
@@ -169,9 +173,9 @@ exports.parseAndInsertOrdersFromExcel = async (
     if (!row || row.every(v => v === undefined || v === null || String(v).trim() === '')) continue;
 
     try {
-      const orderCompany = s(row[H.orderCompany]);
+      const shippingCompany = s(row[H.shippingCompany]);
       const requester    = H.requester !== undefined ? s(row[H.requester]) : '';
-      const orderDate    = d(row[H.orderDate]);
+      const shippingDate    = d(row[H.shippingDate]);
       const quantity     = n(row[H.quantity]);
 
       const itemCode = H.itemCode !== undefined ? s(row[H.itemCode]) : '';
@@ -183,8 +187,8 @@ exports.parseAndInsertOrdersFromExcel = async (
 
       // validations
       if (!itemName && !itemCode) throw new Error('품명(itemName) 또는 품번(itemCode) 필요');
-      if (!orderCompany) throw new Error('발주처(orderCompany) 없음');
-      if (!orderDate)    throw new Error('발주일(orderDate) 파싱 실패');
+      if (!shippingCompany) throw new Error('발주처(shippingCompany) 없음');
+      if (!shippingDate)    throw new Error('발주일(shippingDate) 파싱 실패');
       if (!quantity || quantity <= 0) throw new Error('수량(quantity) 파싱 실패');
 
       docs.push({
@@ -192,9 +196,9 @@ exports.parseAndInsertOrdersFromExcel = async (
         itemCode,
         category,
         itemType,               // 엑셀 값 그대로
-        orderCompany,
+        shippingCompany,
         quantity,
-        orderDate,              // 원본 발주일(UTC 자정 정규화됨)
+        shippingDate,              // 원본 발주일(UTC 자정 정규화됨)
         requester: requester || '미지정',
         status,
         remark,
@@ -223,18 +227,18 @@ exports.parseAndInsertOrdersFromExcel = async (
   try {
     if (!dryRun) {
       // 같은 createdAt-일자 데이터가 있다면 삭제(덮어쓰기)
-      const existingCount = await Order.countDocuments(
+      const existingCount = await Shipping.countDocuments(
         { createdAt: { $gte: startUTC, $lt: endUTC } },
         { session }
       );
 
       if (existingCount > 0) {
-        await Order.deleteMany({ createdAt: { $gte: startUTC, $lt: endUTC } }, { session });
+        await Shipping.deleteMany({ createdAt: { $gte: startUTC, $lt: endUTC } }, { session });
         results.overwriteByCreatedAtDay = true;
       }
 
       // 새 데이터 삽입 (timestamps:true로 createdAt이 자동 기록됨)
-      const created = await Order.insertMany(docs, { session });
+      const created = await Shipping.insertMany(docs, { session });
       results.insertedIds = created.map(d => d._id);
     }
 
