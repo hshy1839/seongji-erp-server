@@ -27,4 +27,4 @@ shippingSchema.index({ shippingCompany: 1, shippingDate: -1 });
 shippingSchema.index({ itemCode: 1, shippingDate: -1 });
 shippingSchema.index({ itemName: 'text', itemCode: 'text' });
 
-module.exports = mongoose.model('Shpping', shippingSchema);
+module.exports = mongoose.model('Shipping', shippingSchema);
