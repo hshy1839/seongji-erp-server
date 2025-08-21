@@ -1,4 +1,5 @@
 const Shipping = require('../models/Shipping');  // Shipping 모델 경로 맞게 조정 필요
+const mongoose = require('mongoose'); 
 const { parseAndInsertShippingsFromExcel } = require('../middlewares/shippingExcelService');
 // 전체 납품 목록 조회
 exports.getAllShippings = async (req, res, next) => {
@@ -35,18 +36,63 @@ exports.createShipping = async (req, res, next) => {
 };
 
 // 납품 수정 (전체/부분)
-exports.updateShipping = async (req, res, next) => {
+exports.updateShipping = async (req, res) => {
   try {
-    const updated = await Shipping.findByIdAndUpdate(
-      req.params.id,
-      req.body,
-      { new: true, runValidators: true }
-    ).populate('productId', 'name productNumber category');
+    // ObjectId 형식 검증
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ ok:false, message: '잘못된 id 형식입니다.' });
+    }
 
-    if (!updated) return res.status(404).json({ message: 'Shipping not found' });
-    res.json(updated);
+    // 바디 sanitize
+    const body = { ...req.body };
+
+    if (body.quantity === '') delete body.quantity;
+    if (typeof body.quantity === 'string') {
+      const q = Number(body.quantity);
+      if (Number.isFinite(q)) body.quantity = q;
+    }
+
+    if (body.shippingDate === '') delete body.shippingDate;
+    if (typeof body.shippingDate === 'string') {
+      const d = new Date(body.shippingDate);
+      if (!Number.isNaN(d.getTime())) body.shippingDate = d;
+    }
+
+    if (req.user?.name) body.requester = req.user.name;
+
+    // 업데이트
+    const doc = await Shipping.findByIdAndUpdate(req.params.id, body, {
+      new: true,
+      runValidators: true,
+    });
+
+    if (!doc) return res.status(404).json({ ok:false, message: 'Shipping not found' });
+
+    // 스키마에 있을 때만 populate
+    const populatePaths = [];
+    if (Shipping.schema.path('productId')) {
+      populatePaths.push({ path: 'productId', select: 'name productNumber category', strictPopulate: false });
+    }
+    if (Shipping.schema.path('shippingCompany')) {
+      populatePaths.push({ path: 'shippingCompany', select: 'name type', strictPopulate: false });
+    }
+    if (populatePaths.length) {
+      await doc.populate(populatePaths);
+    }
+
+    return res.json(doc);
   } catch (error) {
-    next(error);
+    console.error('[updateShipping ERROR]', error);
+    if (error.name === 'ValidationError') {
+      return res.status(400).json({ ok:false, type:'ValidationError', message: error.message, errors: error.errors });
+    }
+    if (error.name === 'CastError') {
+      return res.status(400).json({ ok:false, type:'CastError', path: error.path, value: error.value, message: '값 형식이 올바르지 않습니다.' });
+    }
+    if (error.name === 'StrictPopulateError') {
+      return res.status(400).json({ ok:false, type:'StrictPopulateError', message: error.message, path: error.path });
+    }
+    return res.status(500).json({ ok:false, message: 'Internal Server Error' });
   }
 };
 

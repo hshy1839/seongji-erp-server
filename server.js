@@ -25,6 +25,7 @@ app.use((req, res, next) => {
 });
 app.use(express.json());
 app.use(cookieParser());
+
 const connectDB = require('./src/config/db.config');
 connectDB();
 

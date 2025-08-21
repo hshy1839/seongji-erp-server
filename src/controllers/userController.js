@@ -4,7 +4,7 @@ const bcrypt = require('bcrypt');
 const dotenv = require('dotenv');
 
 dotenv.config();
-const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret';
+const JWT_SECRET = process.env.JWT_SECRET || 'seongji_secret_key';
 const TOKEN_EXPIRY = '2h'; // 세션 유지 시간
 
 // 회원가입
