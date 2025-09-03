@@ -44,7 +44,7 @@ const HEADER_ALIASES = {
   ],
   quantity: [
     '수량','납품수량','총납품수량','출하량','총출하량','총수량',
-    '총발주수량' // 일부 양식에서 이 라벨로도 옴
+    '총발주수량'
   ],
   itemCode: ['품번','코드','품목코드','productcode','code','partnumber','oem','oemcode','완제품 품번'],
   itemName: ['품명','품목명','제품명','자재명','item','itemname','name'],
@@ -52,7 +52,9 @@ const HEADER_ALIASES = {
   requester: ['요청자','담당자','requester'],
   status: ['상태','status'],
   remark: ['비고','메모','remark'],
-  itemType: ['품목유형','itemtype','itemType','type','공정'], // 있으면 그대로 저장
+  itemType: ['품목유형','itemtype','itemType','type','공정'],
+  // [ADD carType]
+  carType: ['차종','cartype','차명','vehicle','model'],
 };
 
 // ===== status map =====
@@ -61,10 +63,6 @@ const mapStatus = v => (/(완료|complete)/i.test(s(v)) ? 'COMPLETE' : 'WAIT');
 // ===== header row detection & index =====
 const MUST = ['shippingCompany','shippingDate','quantity'];
 
-/**
- * 머릿말(대분류/소분류 등) 아닌, 실제 헤더 후보를 찾음.
- * 필수 키 3개 중 2개 이상 매칭되는 첫 행을 즉시採用. 없으면 최대 히트 행.
- */
 function findHeaderRow(rows) {
   const maxScan = Math.min(rows.length, 30);
   let bestIdx = 0, bestHits = -1;
@@ -119,11 +117,6 @@ function debugHeaderInfo({ rows, headerRowIdx, headerRaw, headerNorm, H, aliases
 }
 
 // ===== sheet pick (스마트) =====
-/**
- * 1순위: '출하수량' 시트명
- * 2순위: 필수 헤더 매칭 수가 가장 높은 시트(시트명 보너스: 출하/납품/ship)
- * 최후: 첫 시트
- */
 function pickSheetSmart(workbook) {
   const names = workbook.SheetNames || [];
   if (!names.length) return null;
@@ -183,7 +176,7 @@ exports.parseAndInsertShippingsFromExcel = async (
   { dryRun = false, tzOffsetMin = 540, defaultShippingDate = null } = {}
 ) => {
   const wb = XLSX.read(fileBuffer, { type: 'buffer' });
-  const ws = pickSheetSmart(wb); // ✅ 스마트 선택
+  const ws = pickSheetSmart(wb);
   if (!ws) throw new Error('엑셀 통합문서에 시트가 없습니다.');
 
   const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true });
@@ -202,7 +195,6 @@ exports.parseAndInsertShippingsFromExcel = async (
   const defaultDateObj = defaultShippingDate ? d(defaultShippingDate) : null;
 
   if (missing.length) {
-    // 날짜만 없고 defaultShippingDate가 있으면 허용
     const onlyDateMissing = (missing.length === 1 && missing[0] === 'shippingDate' && !!defaultDateObj);
     if (!onlyDateMissing) {
       console.error(
@@ -242,6 +234,8 @@ exports.parseAndInsertShippingsFromExcel = async (
       const remark   = H.remark   !== undefined ? s(row[H.remark])   : '';
       const status   = H.status   !== undefined ? mapStatus(row[H.status]) : 'WAIT';
       const itemType = H.itemType !== undefined ? s(row[H.itemType]) : '';
+      // [ADD carType]
+      const carType  = H.carType  !== undefined ? s(row[H.carType])  : '';
 
       // validations
       if (!itemName && !itemCode) throw new Error('품명(itemName) 또는 품번(itemCode) 필요');
@@ -254,14 +248,16 @@ exports.parseAndInsertShippingsFromExcel = async (
         itemName,
         itemCode,
         category,
-        itemType,               // 엑셀 값 그대로
+        itemType,
+        // [ADD carType]
+        carType,
         shippingCompany,
         quantity,
-        shippingDate: finalDate, // 시트값 또는 기본값
+        shippingDate: finalDate,
         requester: requester || '미지정',
         status,
         remark,
-        item: null,             // 레거시 참조 비움
+        item: null,
       });
 
       results.success += 1;
@@ -285,7 +281,6 @@ exports.parseAndInsertShippingsFromExcel = async (
 
   try {
     if (!dryRun) {
-      // 같은 createdAt-일자 데이터가 있다면 삭제(덮어쓰기)
       const existingCount = await Shipping.countDocuments(
         { createdAt: { $gte: startUTC, $lt: endUTC } },
         { session }
@@ -296,7 +291,6 @@ exports.parseAndInsertShippingsFromExcel = async (
         results.overwriteByCreatedAtDay = true;
       }
 
-      // 새 데이터 삽입 (timestamps:true로 createdAt 자동 기록)
       const created = await Shipping.insertMany(docs, { session });
       results.insertedIds = created.map(d => d._id);
     }

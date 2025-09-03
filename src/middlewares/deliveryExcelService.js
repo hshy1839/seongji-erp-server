@@ -1,7 +1,7 @@
 // services/deliveryExcelService.js
 const XLSX = require('xlsx');
 const mongoose = require('mongoose');
-const Delivery = require('../models/Delivery'); // ← 이미 있는 Delivery 모델을 사용(스키마는 프로젝트 기준)
+const Delivery = require('../models/Delivery'); // ← 기존 Delivery 모델 사용
 
 // ===== utils =====
 const s = v => (v === undefined || v === null ? '' : String(v).trim());
@@ -29,7 +29,6 @@ const d = v => {
 };
 
 // ===== header aliases =====
-// 프로젝트 컬럼명에 맞춰 자유롭게 추가/수정 가능
 const HEADER_ALIASES = {
   deliveryCompany: ['납품처','납입처','거래처','납품회사','deliverycompany','company'],
   deliveryDate:    ['납품일','납입일','일자','date','deliverydate'],
@@ -41,6 +40,8 @@ const HEADER_ALIASES = {
   status:          ['상태','status'],
   remark:          ['비고','메모','remark','note'],
   itemType:        ['품목유형','itemtype','itemType','type','공정'],
+  // [ADD carType]
+  carType:         ['차종','cartype','차명','vehicle','model'], 
 };
 
 // ===== status map =====
@@ -177,6 +178,8 @@ exports.parseAndInsertDeliveriesFromExcel = async (
       const remark   = H.remark   !== undefined ? s(row[H.remark])   : '';
       const status   = H.status   !== undefined ? mapStatus(row[H.status]) : 'WAIT';
       const itemType = H.itemType !== undefined ? s(row[H.itemType]) : '';
+      // [ADD carType]
+      const carType  = H.carType  !== undefined ? s(row[H.carType])  : '';
 
       // validations
       if (!itemName && !itemCode) throw new Error('품명(itemName) 또는 품번(itemCode) 필요');
@@ -184,26 +187,22 @@ exports.parseAndInsertDeliveriesFromExcel = async (
       if (!deliveryDate)    throw new Error('납품일(deliveryDate) 파싱 실패');
       if (!quantity || quantity <= 0) throw new Error('수량(quantity) 파싱 실패');
 
-      // 프로젝트의 Delivery 스키마에 맞춰 필드명 매핑
-      // 예시 스키마 가정:
-      // {
-      //   itemName, itemCode, category, itemType,
-      //   deliveryCompany, quantity, deliveryDate,
-      //   requester, status, remark,
-      //   item: ObjectId (레거시 참조 null)
-      // }
+      // Delivery 스키마에 맞춰 필드 매핑
       docs.push({
         itemName,
         itemCode,
         category,
         itemType,
+        // [ADD carType] ↓↓↓
+        carType,
+        // ↑↑↑
         deliveryCompany,
         quantity,
         deliveryDate,
         requester: requester || '미지정',
         status,
         remark,
-        item: null,
+        item: null, // 레거시 참조 사용 안함
       });
 
       results.success += 1;

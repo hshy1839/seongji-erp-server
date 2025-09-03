@@ -39,7 +39,9 @@ const HEADER_ALIASES = {
   requester:    ['요청자','담당자','requester'],
   status:       ['상태','status'],
   remark:       ['비고','메모','remark'],
-  itemType:     ['품목유형','itemtype','itemType','type','공정'], // ← 있으면 그대로 저장
+  itemType:     ['품목유형','itemtype','itemType','type','공정'],
+  // [ADD carType]
+  carType:      ['차종','cartype','차명','vehicle','model'], 
 };
 
 // ===== status map =====
@@ -102,31 +104,23 @@ function debugHeaderInfo({ rows, headerRowIdx, headerRaw, headerNorm, H, aliases
 }
 
 // ===== createdAt 기준 "업로드 일자" 범위 (기본: KST, UTC+9) =====
-// tzOffsetMin: 분 단위 오프셋(예: KST=+540)
 function getUploadDayRangeUTC(now = new Date(), tzOffsetMin = 540) {
   const offsetMs = tzOffsetMin * 60 * 1000;
-  // 로컬(=타깃 타임존) 기준 하루 시작
   const localNow = new Date(now.getTime() + offsetMs);
   const y = localNow.getUTCFullYear();
   const m = localNow.getUTCMonth();
   const ddd = localNow.getUTCDate();
-  // 다시 UTC로 환산(오프셋 되돌림)
-  const startLocal = Date.UTC(y, m, ddd);           // local 00:00:00
-  const startUTC = new Date(startLocal - offsetMs); // 해당 로컬 날의 UTC 시작
+  const startLocal = Date.UTC(y, m, ddd);
+  const startUTC = new Date(startLocal - offsetMs);
   const endUTC = new Date(startUTC.getTime() + 24 * 60 * 60 * 1000);
   const key = `${y}-${String(m + 1).padStart(2, '0')}-${String(ddd).padStart(2, '0')}`;
   return { startUTC, endUTC, key };
 }
 
 // ===== main =====
-/**
- * 엑셀 업로드 정책:
- * - 현재 업로드 시각의 "업로드 일자"(기본: KST)와 DB의 createdAt이 같은 날인 레코드가 있으면 → 그 날 전체를 삭제하고 새 데이터로 교체(덮어쓰기)
- * - createdAt이 다른 날만 DB에 있으면 → 그대로 추가
- */
 exports.parseAndInsertOrdersFromExcel = async (
   fileBuffer,
-  { dryRun = false, tzOffsetMin = 540 } = {} // 기본 KST
+  { dryRun = false, tzOffsetMin = 540 } = {}
 ) => {
   const wb = XLSX.read(fileBuffer, { type: 'buffer' });
   const ws = pickSheet(wb);
@@ -161,7 +155,7 @@ exports.parseAndInsertOrdersFromExcel = async (
     errors: [],
     insertedIds: [],
     overwriteByCreatedAtDay: false,
-    overwriteDayKey: null, // YYYY-MM-DD (타깃 타임존 기준)
+    overwriteDayKey: null,
   };
 
   for (let r = start; r < rows.length; r++) {
@@ -180,6 +174,8 @@ exports.parseAndInsertOrdersFromExcel = async (
       const remark   = H.remark   !== undefined ? s(row[H.remark])   : '';
       const status   = H.status   !== undefined ? mapStatus(row[H.status]) : 'WAIT';
       const itemType = H.itemType !== undefined ? s(row[H.itemType]) : '';
+      // [ADD carType]
+      const carType  = H.carType  !== undefined ? s(row[H.carType])  : '';
 
       // validations
       if (!itemName && !itemCode) throw new Error('품명(itemName) 또는 품번(itemCode) 필요');
@@ -191,14 +187,16 @@ exports.parseAndInsertOrdersFromExcel = async (
         itemName,
         itemCode,
         category,
-        itemType,               // 엑셀 값 그대로
+        itemType,
+        // [ADD carType]
+        carType,
         orderCompany,
         quantity,
-        orderDate,              // 원본 발주일(UTC 자정 정규화됨)
+        orderDate,
         requester: requester || '미지정',
         status,
         remark,
-        item: null,             // 레거시 참조 비움
+        item: null,
       });
 
       results.success += 1;
@@ -222,7 +220,6 @@ exports.parseAndInsertOrdersFromExcel = async (
 
   try {
     if (!dryRun) {
-      // 같은 createdAt-일자 데이터가 있다면 삭제(덮어쓰기)
       const existingCount = await Order.countDocuments(
         { createdAt: { $gte: startUTC, $lt: endUTC } },
         { session }
@@ -233,7 +230,6 @@ exports.parseAndInsertOrdersFromExcel = async (
         results.overwriteByCreatedAtDay = true;
       }
 
-      // 새 데이터 삽입 (timestamps:true로 createdAt이 자동 기록됨)
       const created = await Order.insertMany(docs, { session });
       results.insertedIds = created.map(d => d._id);
     }

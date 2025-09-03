@@ -11,7 +11,7 @@ const orderSchema = new mongoose.Schema(
     itemName: { type: String, required: true, trim: true },// 품명
     itemCode: { type: String, default: '', trim: true },   // 품번
     category: { type: String, default: '', trim: true },   // 대분류/카테고리
-
+    carType: { type: String, default: '', trim: true }, 
     orderCompany: { type: String, required: true, trim: true },
     quantity: { type: Number, required: true, min: 1 },
     orderDate: { type: Date, required: true },
