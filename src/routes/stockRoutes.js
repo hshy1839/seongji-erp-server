@@ -1,17 +1,22 @@
 const express = require('express');
+const multer = require('multer');
 const router = express.Router();
-const stockController = require('../controllers/stockController');
+const stockCtrl = require('../controllers/stockController');
 
-router.use((req, res, next) => {
-  // 인증, 로깅 등 공통 미들웨어 가능
-  next();
-});
+const upload = multer(); // memoryStorage 기본
 
-router.get('/stocks', stockController.getAllStocks);
-router.get('/stocks/:id', stockController.getStockById);
-router.post('/stocks', stockController.createStock);
-router.put('/stocks/:id', stockController.updateStock);
-router.patch('/stocks/:id', stockController.updateStock);
-router.delete('/stocks/:id', stockController.deleteStock);
+router.get('/', stockCtrl.getAllStocks);
+router.get('/:id', stockCtrl.getStockById);
+
+router.post('/', stockCtrl.createStock);
+router.patch('/:id', stockCtrl.updateStock);
+router.delete('/:id', stockCtrl.deleteStock);
+
+router.put('/upsert', stockCtrl.upsertStock);
+router.post('/add-inbound', stockCtrl.addInbound);
+router.post('/consume', stockCtrl.consumeByProduction);
+
+// 엑셀 업로드 (multipart/form-data, field name: file)
+router.post('/upload', upload.single('file'), stockCtrl.uploadStocksExcelController);
 
 module.exports = router;

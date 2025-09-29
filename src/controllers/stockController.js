@@ -1,84 +1,278 @@
+// controllers/stockController.js
+const mongoose = require('mongoose');
+const XLSX = require('xlsx');
 const Stock = require('../models/Stock');
+const { parseAndUpsertStocksFromExcel } = require('../middlewares/stockExcelService');
+/** 숫자 파싱 유틸 */
+const toNum = (v, d = 0) => {
+  const n = Number(String(v).replace(/[, ]/g, ''));
+  return Number.isFinite(n) ? n : d;
+};
 
-// 전체 재고 조회
+/** 고유키 구성 유틸 */
+const keyFrom = (src = {}) => {
+  const {
+    customer, carType, deliveryTo, division, partNumber, materialCode, materialName,
+  } = src;
+
+  const miss = ['customer','carType','deliveryTo','division','partNumber','materialCode']
+    .filter(k => !src?.[k]);
+  if (miss.length) {
+    const err = new Error(`키 필드 누락: ${miss.join(', ')}`);
+    err.status = 400;
+    throw err;
+  }
+  return { customer, carType, deliveryTo, division, partNumber, materialCode, materialName };
+};
+
+/** =========================
+ * 목록 조회 (필터 + 페이징)
+ * GET /api/stocks
+ * query: customer, carType, deliveryTo, division, partNumber, materialCode, materialName, q, page, limit, sort
+ * ========================= */
 exports.getAllStocks = async (req, res, next) => {
   try {
-    const stocks = await Stock.find().sort({ updatedAt: -1 });
+    const {
+      customer, carType, deliveryTo, division, partNumber,
+      materialCode, materialName, q,
+      page = 1, limit = 20, sort = '-updatedAt',
+    } = req.query;
 
-    // 제품/자재 정보 합쳐서 응답
-    const populated = await Promise.all(
-      stocks.map(async (stock) => {
-        const model = stock.itemType === 'Product' ? 'Product' : 'Material';
-        const populatedItem = await stock.populate({ path: 'item', model, select: 'name code productNumber category' });
-        return populatedItem;
-      })
-    );
+    const filter = {};
+    if (customer) filter.customer = customer;
+    if (carType) filter.carType = carType;
+    if (deliveryTo) filter.deliveryTo = deliveryTo;
+    if (division) filter.division = division;
+    if (partNumber) filter.partNumber = partNumber;
+    if (materialCode) filter.materialCode = materialCode;
+    if (materialName) filter.materialName = materialName;
 
-    res.json(populated);
-  } catch (error) {
-    next(error);
-  }
-};
+    if (q) {
+      filter.$or = [
+        { customer: { $regex: q, $options: 'i' } },
+        { carType: { $regex: q, $options: 'i' } },
+        { deliveryTo: { $regex: q, $options: 'i' } },
+        { division: { $regex: q, $options: 'i' } },
+        { partNumber: { $regex: q, $options: 'i' } },
+        { materialCode: { $regex: q, $options: 'i' } },
+        { materialName: { $regex: q, $options: 'i' } },
+      ];
+    }
 
-// 단일 재고 조회
-exports.getStockById = async (req, res, next) => {
-  try {
-    const stock = await Stock.findById(req.params.id);
-    if (!stock) return res.status(404).json({ message: 'Stock not found' });
+    const pageNum = Math.max(1, Number(page) || 1);
+    const limitNum = Math.max(1, Math.min(200, Number(limit) || 20));
+    const skip = (pageNum - 1) * limitNum;
 
-    const model = stock.itemType === 'Product' ? 'Product' : 'Material';
-    const populated = await stock.populate({ path: 'item', model, select: 'name code productNumber category' });
+    const [items, total] = await Promise.all([
+      Stock.find(filter).sort(sort).skip(skip).limit(limitNum),
+      Stock.countDocuments(filter),
+    ]);
 
-    res.json(populated);
-  } catch (error) {
-    next(error);
-  }
-};
-
-// 재고 생성
-exports.createStock = async (req, res, next) => {
-  try {
-    const stock = new Stock(req.body);
-    const saved = await stock.save();
-
-    const model = saved.itemType === 'Product' ? 'Product' : 'Material';
-    const populated = await saved.populate({ path: 'item', model, select: 'name code productNumber category' });
-
-    res.status(201).json(populated);
-  } catch (error) {
-    next(error);
-  }
-};
-
-// 재고 업데이트
-exports.updateStock = async (req, res, next) => {
-  try {
-    const { _id, quantity, location } = req.body;
-
-    const stock = await Stock.findById(_id);
-    if (!stock) return res.status(404).json({ message: 'Stock not found' });
-
-    const diff = Number(quantity) - Number(stock.quantity);
-
-    stock.quantity = quantity;
-    stock.netQuantity += diff; // 누적 증가
-    stock.location = location;
-    stock.updatedAt = new Date();
-
-    const updated = await stock.save();
-    res.json(updated);
+    res.json({ page: pageNum, limit: limitNum, total, items });
   } catch (err) {
     next(err);
   }
 };
 
-// 재고 삭제
+/** =========================
+ * 단건 조회
+ * GET /api/stocks/:id
+ * ========================= */
+exports.getStockById = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.isValidObjectId(id)) return res.status(400).json({ message: 'invalid id' });
+    const doc = await Stock.findById(id);
+    if (!doc) return res.status(404).json({ message: 'not found' });
+    res.json(doc);
+  } catch (err) {
+    next(err);
+  }
+};
+
+/** =========================
+ * 생성 (명시적 생성) - 중복키면 409
+ * POST /api/stocks
+ * body: customer, carType, deliveryTo, division, partNumber, materialName, materialCode, bomQtyPer, openingQty, inboundQty, usedQty, uom, remark
+ * ========================= */
+exports.createStock = async (req, res, next) => {
+  try {
+    const key = keyFrom(req.body);
+    const exists = await Stock.findOne({
+      customer: key.customer,
+      carType: key.carType,
+      deliveryTo: key.deliveryTo,
+      division: key.division,
+      partNumber: key.partNumber,
+      materialCode: key.materialCode,
+    });
+    if (exists) return res.status(409).json({ message: 'duplicate key', id: exists._id });
+
+    const doc = await Stock.create({
+      ...key,
+      materialName: req.body.materialName,
+      bomQtyPer: toNum(req.body.bomQtyPer, 0),
+      openingQty: toNum(req.body.openingQty, 0),
+      inboundQty: toNum(req.body.inboundQty, 0),
+      usedQty: toNum(req.body.usedQty, 0),
+      uom: req.body.uom || 'EA',
+      remark: req.body.remark || '',
+    });
+    res.status(201).json(doc);
+  } catch (err) {
+    if (err?.code === 11000) {
+      err.status = 409;
+      err.message = 'duplicate key';
+    }
+    next(err);
+  }
+};
+
+/** =========================
+ * 업데이트 (부분/전체)
+ * PATCH /api/stocks/:id
+ * ========================= */
+exports.updateStock = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({ ok:false, message:'잘못된 id 형식입니다.' });
+    }
+
+    const body = { ...req.body };
+    // 숫자 필드 정규화
+    ['bomQtyPer','openingQty','inboundQty','usedQty'].forEach(k => {
+      if (body[k] === '') delete body[k];
+      if (typeof body[k] !== 'undefined') body[k] = toNum(body[k]);
+    });
+
+    const doc = await Stock.findByIdAndUpdate(id, body, { new: true, runValidators: true });
+    if (!doc) return res.status(404).json({ ok:false, message:'not found' });
+    res.json(doc);
+  } catch (err) {
+    if (err.name === 'ValidationError') {
+      return res.status(400).json({ ok:false, type:'ValidationError', message: err.message, errors: err.errors });
+    }
+    if (err.name === 'CastError') {
+      return res.status(400).json({ ok:false, type:'CastError', path: err.path, value: err.value, message:'값 형식이 올바르지 않습니다.' });
+    }
+    res.status(500).json({ ok:false, message:'Internal Server Error' });
+  }
+};
+
+/** =========================
+ * 삭제
+ * DELETE /api/stocks/:id
+ * ========================= */
 exports.deleteStock = async (req, res, next) => {
   try {
     const deleted = await Stock.findByIdAndDelete(req.params.id);
-    if (!deleted) return res.status(404).json({ message: 'Stock not found' });
-    res.json({ message: 'Stock deleted' });
-  } catch (error) {
-    next(error);
+    if (!deleted) return res.status(404).json({ message: 'not found' });
+    res.json({ message: 'deleted' });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/** =========================
+ * 키기반 업서트 (권장)
+ * PUT /api/stocks/upsert
+ * body: 키필드 + 갱신필드
+ * ========================= */
+exports.upsertStock = async (req, res, next) => {
+  try {
+    const key = keyFrom(req.body);
+    const update = {
+      materialName: req.body.materialName,
+      uom: req.body.uom || 'EA',
+      remark: req.body.remark || '',
+    };
+
+    // 숫자 필드가 온 경우만 반영
+    ['bomQtyPer','openingQty','inboundQty','usedQty'].forEach(k => {
+      if (typeof req.body[k] !== 'undefined') update[k] = toNum(req.body[k]);
+    });
+
+    const doc = await Stock.findOneAndUpdate(
+      {
+        customer: key.customer,
+        carType: key.carType,
+        deliveryTo: key.deliveryTo,
+        division: key.division,
+        partNumber: key.partNumber,
+        materialCode: key.materialCode,
+      },
+      {
+        $setOnInsert: { ...key },
+        $set: update,
+      },
+      { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true }
+    );
+    res.json({ ok: true, doc });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/** =========================
+ * 입고 증가 (누적)
+ * POST /api/stocks/add-inbound
+ * body: 키필드 + qty, when?
+ * ========================= */
+exports.addInbound = async (req, res, next) => {
+  try {
+    const key = keyFrom(req.body);
+    const qty = toNum(req.body.qty, 0);
+    if (qty <= 0) return res.status(400).json({ ok:false, message:'qty must be > 0' });
+    const when = req.body.when ? new Date(req.body.when) : new Date();
+
+    const doc = await Stock.addInbound(key, qty, when);
+    res.json({ ok:true, doc });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/** =========================
+ * 생산실적 사용(자재 차감)
+ * POST /api/stocks/consume
+ * body: 키필드 + useQty, when?
+ * ========================= */
+exports.consumeByProduction = async (req, res, next) => {
+  try {
+    const key = keyFrom(req.body);
+    const useQty = toNum(req.body.useQty, 0);
+    if (useQty <= 0) return res.status(400).json({ ok:false, message:'useQty must be > 0' });
+    const when = req.body.when ? new Date(req.body.when) : new Date();
+
+    const doc = await Stock.consumeByProduction(key, useQty, when);
+    res.json({ ok:true, doc });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/** =========================
+ * 엑셀 업로드 (벌크 업서트)
+ * POST /api/stocks/upload?dryRun=true&mode=openAsOpening=true
+ * - 기대 컬럼(한글 헤더):
+ *   발주처, 차종, 납품처, 구분, 품번, 자재, 자재품번, 재고수량, 소요량
+ * - 옵션:
+ *   dryRun=true  : 검증만
+ *   openAsOpening=true : 재고수량을 openingQty로 입력(기본 true)
+ * ========================= */
+exports.uploadStocksExcelController = async (req, res) => {
+  try {
+    if (!req.file?.buffer) {
+      return res.status(400).json({ ok:false, message:'파일이 없습니다.' });
+    }
+    const dryRun = String(req.query.dryRun || 'false').toLowerCase() === 'true';
+    const openAsOpening = String(req.query.openAsOpening || 'true').toLowerCase() === 'true';
+
+    const report = await parseAndUpsertStocksFromExcel(req.file.buffer, { dryRun, openAsOpening });
+    return res.json(report);
+  } catch (err) {
+    console.error('[uploadStocksExcelController]', err);
+    res.status(500).json({ ok:false, message: err.message || '서버 오류' });
   }
 };
