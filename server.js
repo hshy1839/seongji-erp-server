@@ -40,6 +40,9 @@ const materialRoutes = require('./src/routes/materialRoutes');
 const noticeRoutes = require('./src/routes/noticeRoutes');
 const scheduleRoutes = require('./src/routes/scheduleRoutes');
 const userRoutes = require('./src/routes/userRoutes');
+const productionRoutes = require('./src/routes/productionRoutes');  
+
+
 app.get('/ping', (req, res) => {
   res.status(200).send('pong');
 });
@@ -47,6 +50,7 @@ app.use('/api', productRoutes);
 app.use('/api', orderRoutes);
 app.use('/api', deliveryRoutes);
 app.use('/api', shippingRoutes);
+app.use('/api/production', productionRoutes); 
 app.use('/api', companyRoutes);
 app.use('/api', packagingRoutes);
 app.use('/api', materialRoutes);
