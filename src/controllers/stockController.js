@@ -11,18 +11,22 @@ const toNum = (v, d = 0) => {
 
 /** 고유키 구성 유틸 */
 const keyFrom = (src = {}) => {
-  const {
-    customer, carType, deliveryTo, division, partNumber, materialCode, materialName,
-  } = src;
-
-  const miss = ['customer','carType','deliveryTo','division','partNumber','materialCode']
-    .filter(k => !src?.[k]);
+  const { division, partNumber, materialCode } = src;
+  const miss = ['division','partNumber','materialCode'].filter(k => !src?.[k]);
   if (miss.length) {
     const err = new Error(`키 필드 누락: ${miss.join(', ')}`);
     err.status = 400;
     throw err;
   }
-  return { customer, carType, deliveryTo, division, partNumber, materialCode, materialName };
+  return {
+    // 키
+    division, partNumber, materialCode,
+    // 선택/부가(없어도 됨)
+    customer: src.customer ?? '',
+    carType: src.carType ?? '',
+    deliveryTo: src.deliveryTo ?? '',
+    materialName: src.materialName ?? '',
+  };
 };
 
 /** =========================
@@ -34,8 +38,8 @@ exports.getAllStocks = async (req, res, next) => {
   try {
     const {
       customer, carType, deliveryTo, division, partNumber,
-      materialCode, materialName, q,
-      page = 1, limit = 20, sort = '-updatedAt',
+     materialCode, materialName, q,
+     page = 1, limit = 20, sort = '-updatedAt', all,
     } = req.query;
 
     const filter = {};
@@ -59,16 +63,28 @@ exports.getAllStocks = async (req, res, next) => {
       ];
     }
 
-    const pageNum = Math.max(1, Number(page) || 1);
-    const limitNum = Math.max(1, Math.min(200, Number(limit) || 20));
-    const skip = (pageNum - 1) * limitNum;
+   const wantAll = String(all).toLowerCase() === 'true' || String(limit) === '-1';
+   const sortSpec = sort || '-updatedAt';
+   const projection = {}; // 필요시 성능 위해 특정 필드만
 
-    const [items, total] = await Promise.all([
-      Stock.find(filter).sort(sort).skip(skip).limit(limitNum),
-      Stock.countDocuments(filter),
-    ]);
-
-    res.json({ page: pageNum, limit: limitNum, total, items });
+   if (wantAll) {
+     const [items, total] = await Promise.all([
+       Stock.find(filter, projection).sort(sortSpec).lean(),
+       Stock.countDocuments(filter),
+     ]);
+     return res.json({ page: 1, limit: total, total, items });
+   } else {
+     const pageNum  = Math.max(1, Number(page) || 1);
+     // 상한 넉넉히 (예: 5000). 한 번에 전부가 싫으면 1000 정도로.
+     const limitMax = 5000;
+     const limitNum = Math.max(1, Math.min(limitMax, Number(limit) || 20));
+     const skip     = (pageNum - 1) * limitNum;
+     const [items, total] = await Promise.all([
+       Stock.find(filter, projection).sort(sortSpec).skip(skip).limit(limitNum).lean(),
+       Stock.countDocuments(filter),
+     ]);
+     return res.json({ page: pageNum, limit: limitNum, total, items });
+   }
   } catch (err) {
     next(err);
   }
@@ -98,26 +114,30 @@ exports.getStockById = async (req, res, next) => {
 exports.createStock = async (req, res, next) => {
   try {
     const key = keyFrom(req.body);
-    const exists = await Stock.findOne({
-      customer: key.customer,
-      carType: key.carType,
-      deliveryTo: key.deliveryTo,
-      division: key.division,
-      partNumber: key.partNumber,
-      materialCode: key.materialCode,
-    });
-    if (exists) return res.status(409).json({ message: 'duplicate key', id: exists._id });
+const exists = await Stock.findOne({
+  division: key.division,
+  partNumber: key.partNumber,
+  materialCode: key.materialCode,
+});
+if (exists) return res.status(409).json({ message: 'duplicate key', id: exists._id });
 
-    const doc = await Stock.create({
-      ...key,
-      materialName: req.body.materialName,
-      bomQtyPer: toNum(req.body.bomQtyPer, 0),
-      openingQty: toNum(req.body.openingQty, 0),
-      inboundQty: toNum(req.body.inboundQty, 0),
-      usedQty: toNum(req.body.usedQty, 0),
-      uom: req.body.uom || 'EA',
-      remark: req.body.remark || '',
-    });
+   const doc = await Stock.create({
+  division: key.division,
+  partNumber: key.partNumber,
+  materialCode: key.materialCode,
+  // 선택 필드들
+  customer: key.customer,
+  carType: key.carType,
+  deliveryTo: key.deliveryTo,
+  materialName: req.body.materialName ?? key.materialName,
+  bomQtyPer: toNum(req.body.bomQtyPer, 0),
+  openingQty: toNum(req.body.openingQty, 0),
+  inboundQty: toNum(req.body.inboundQty, 0),
+  usedQty: toNum(req.body.usedQty, 0),
+  uom: req.body.uom || 'EA',
+  remark: req.body.remark || '',
+});
+
     res.status(201).json(doc);
   } catch (err) {
     if (err?.code === 11000) {
@@ -181,34 +201,33 @@ exports.deleteStock = async (req, res, next) => {
  * ========================= */
 exports.upsertStock = async (req, res, next) => {
   try {
-    const key = keyFrom(req.body);
-    const update = {
-      materialName: req.body.materialName,
-      uom: req.body.uom || 'EA',
-      remark: req.body.remark || '',
-    };
+   const key = keyFrom(req.body);
+const update = {
+  materialName: req.body.materialName ?? key.materialName,
+  uom: req.body.uom || 'EA',
+  remark: req.body.remark || '',
+  // 선택 부가
+  customer: req.body.customer ?? key.customer ?? '',
+  carType: req.body.carType ?? key.carType ?? '',
+  deliveryTo: req.body.deliveryTo ?? key.deliveryTo ?? '',
+};
+['bomQtyPer','openingQty','inboundQty','usedQty'].forEach(k => {
+  if (typeof req.body[k] !== 'undefined') update[k] = toNum(req.body[k]);
+});
 
-    // 숫자 필드가 온 경우만 반영
-    ['bomQtyPer','openingQty','inboundQty','usedQty'].forEach(k => {
-      if (typeof req.body[k] !== 'undefined') update[k] = toNum(req.body[k]);
-    });
+const doc = await Stock.findOneAndUpdate(
+  {
+    division: key.division,
+    partNumber: key.partNumber,
+    materialCode: key.materialCode,
+  },
+  {
+    $setOnInsert: { division: key.division, partNumber: key.partNumber, materialCode: key.materialCode },
+    $set: update,
+  },
+  { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true }
+);
 
-    const doc = await Stock.findOneAndUpdate(
-      {
-        customer: key.customer,
-        carType: key.carType,
-        deliveryTo: key.deliveryTo,
-        division: key.division,
-        partNumber: key.partNumber,
-        materialCode: key.materialCode,
-      },
-      {
-        $setOnInsert: { ...key },
-        $set: update,
-      },
-      { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true }
-    );
-    res.json({ ok: true, doc });
   } catch (err) {
     next(err);
   }
