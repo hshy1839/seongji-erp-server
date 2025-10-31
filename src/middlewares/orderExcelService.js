@@ -18,7 +18,7 @@ const d = v => {
   if (typeof v === 'number') {
     const date = XLSX.SSF.parse_date_code(v);
     if (!date) return null;
-    // 원본 셀은 "날짜"만 있다고 가정 → UTC 자정으로 고정
+    // "날짜"만 있다고 가정 → UTC 자정으로 고정
     return new Date(Date.UTC(date.y, date.m - 1, date.d));
   }
   const txt = s(v).replace(/\./g, '-').replace(/\//g, '-');
@@ -30,18 +30,18 @@ const d = v => {
 
 // ===== header aliases =====
 const HEADER_ALIASES = {
+  // 기존 일반 포맷 + 모비스 간소 포맷 혼용
   orderCompany: ['발주처','주문처','거래처','발주회사','ordercompany','company'],
   orderDate:    ['발주일','주문일','일자','date','orderdate','납품일자','납입일','납입일자'],
-  quantity:     ['수량','발주수량','총발주수량','qty','quantity','총수량'],
-  itemCode:     ['품번','코드','품목코드','productcode','code','partnumber','oem','oemcode'],
+  quantity:     ['수량','발주수량','총발주수량','총 발주수량','총발주량','총 발주량','qty','quantity','총수량'],
+  itemCode:     ['품번','코드','품목코드','productcode','code','partnumber','oem','oemcode','모비스품번','모비스 품번'],
   itemName:     ['품명','품목명','제품명','자재명','item','itemname','name'],
-  category:     ['대분류','카테고리','분류','category'],
+  category:     ['대분류','카테고리','분류','category','구분','division'],
   requester:    ['요청자','담당자','requester'],
   status:       ['상태','status'],
   remark:       ['비고','메모','remark'],
   itemType:     ['품목유형','itemtype','itemType','type','공정'],
-  // [ADD carType]
-  carType:      ['차종','cartype','차명','vehicle','model'], 
+  carType:      ['차종','cartype','차명','vehicle','model'],
 };
 
 // ===== status map =====
@@ -49,23 +49,43 @@ const mapStatus = v => (/(완료|complete)/i.test(s(v)) ? 'COMPLETE' : 'WAIT');
 
 // ===== sheet pick =====
 function pickSheet(workbook) {
-  const prefer = ['총발주수량', '발주', 'orders'];
+  const prefer = ['발주수량', '총발주수량', '발주', 'orders'];
   for (const name of prefer) {
     if (workbook.Sheets[name]) return workbook.Sheets[name];
   }
   return workbook.Sheets[workbook.SheetNames[0]];
 }
 
-// ===== header row detection & index =====
-function findHeaderRow(rows) {
-  const must = ['orderCompany','orderDate','quantity'];
+// ===== header row detection =====
+// 표준 포맷(발주처/발주일/수량) 실패 시, MOBIS-간소 포맷(모비스품번/구분/총발주량)으로 자동 전환
+function findHeaderProfile(rows) {
   const maxScan = Math.min(rows.length, 20);
+
+  const build = headerRow => {
+    const raw = (rows[headerRow] || []).map(v => s(v));
+    return { headerRow, headerRaw: raw, headerNorm: raw.map(norm) };
+  };
+
+  // 1) 표준 프로필: orderCompany + orderDate + quantity 중 2개 이상
   for (let r = 0; r < maxScan; r++) {
-    const header = (rows[r] || []).map(h => norm(h));
-    const hit = must.filter(k => HEADER_ALIASES[k].some(a => header.includes(norm(a))));
-    if (hit.length >= 2) return r;
+    const { headerNorm } = build(r);
+    const hit = ['orderCompany','orderDate','quantity'].filter(k =>
+      HEADER_ALIASES[k].some(a => headerNorm.some(h => h.includes(norm(a))))
+    );
+    if (hit.length >= 2) return { profile: 'standard', ...build(r) };
   }
-  return 0;
+
+  // 2) MOBIS 간소 프로필: itemCode + category + quantity 중 2개 이상
+  for (let r = 0; r < maxScan; r++) {
+    const { headerNorm } = build(r);
+    const hit = ['itemCode','category','quantity'].filter(k =>
+      HEADER_ALIASES[k].some(a => headerNorm.some(h => h.includes(norm(a))))
+    );
+    if (hit.length >= 2) return { profile: 'mobis-simple', ...build(r) };
+  }
+
+  // 못 찾으면 0행 가정
+  return { profile: 'standard', ...build(0) };
 }
 
 function buildHeaderIndex(headerRow) {
@@ -79,12 +99,13 @@ function buildHeaderIndex(headerRow) {
 }
 
 // ===== debug header =====
-function debugHeaderInfo({ rows, headerRowIdx, headerRaw, headerNorm, H, aliases }) {
+function debugHeaderInfo({ rows, headerRowIdx, headerRaw, headerNorm, H, aliases, profile }) {
   const lines = [];
   lines.push('=== [Excel Header Debug] =================================');
-  lines.push(`- headerRowIdx: ${headerRowIdx}`);
-  lines.push(`- headerRaw   : ${JSON.stringify(headerRaw)}`);
-  lines.push(`- headerNorm  : ${JSON.stringify(headerNorm)}`);
+  lines.push(`- profile    : ${profile}`);
+  lines.push(`- headerRow  : ${headerRowIdx}`);
+  lines.push(`- headerRaw  : ${JSON.stringify(headerRaw)}`);
+  lines.push(`- headerNorm : ${JSON.stringify(headerNorm)}`);
   lines.push('- key → foundIndex / matchedAlias');
   Object.entries(aliases).forEach(([key, aliasList]) => {
     const foundIndex = H[key];
@@ -103,7 +124,7 @@ function debugHeaderInfo({ rows, headerRowIdx, headerRaw, headerNorm, H, aliases
   return lines.join('\n');
 }
 
-// ===== createdAt 기준 "업로드 일자" 범위 (기본: KST, UTC+9) =====
+// ===== 업로드 일자 범위(KST, UTC+9) =====
 function getUploadDayRangeUTC(now = new Date(), tzOffsetMin = 540) {
   const offsetMs = tzOffsetMin * 60 * 1000;
   const localNow = new Date(now.getTime() + offsetMs);
@@ -117,6 +138,8 @@ function getUploadDayRangeUTC(now = new Date(), tzOffsetMin = 540) {
   return { startUTC, endUTC, key };
 }
 
+const DEFAULT_COMPANY = '모비스';
+
 // ===== main =====
 exports.parseAndInsertOrdersFromExcel = async (
   fileBuffer,
@@ -129,21 +152,25 @@ exports.parseAndInsertOrdersFromExcel = async (
   if (!rows.length) throw new Error('엑셀 시트가 비어있습니다.');
 
   // header
-  const headerRowIdx = findHeaderRow(rows);
-  const headerRaw  = (rows[headerRowIdx] || []).map(v => s(v));
-  const headerNorm = headerRaw.map(norm);
+  const { profile, headerRow, headerRaw, headerNorm } = findHeaderProfile(rows);
   const H = buildHeaderIndex(headerRaw);
-  const start = headerRowIdx + 1;
+  const start = headerRow + 1;
 
-  // required headers
-  const need = ['orderCompany','orderDate','quantity'];
+  // 필수 헤더: 프로필별
+  let need = [];
+  if (profile === 'standard') {
+    need = ['quantity']; // 유연성 위해 최소만 강제
+  } else if (profile === 'mobis-simple') {
+    need = ['itemCode','quantity']; // 모비스 간소: 모비스품번 + 총발주량
+  }
+
   const missing = need.filter(k => H[k] === undefined);
   if (missing.length) {
     console.error(
-      debugHeaderInfo({ rows, headerRowIdx, headerRaw, headerNorm, H, aliases: HEADER_ALIASES })
+      debugHeaderInfo({ rows, headerRowIdx: headerRow, headerRaw, headerNorm, H, aliases: HEADER_ALIASES, profile })
     );
     const shortDump = headerRaw.map(h => `[${h}]`).join(', ');
-    throw new Error(`필수 헤더 누락: ${missing.join(', ')}. 헤더행=${headerRowIdx}, 헤더=${shortDump} (서버 콘솔 참조)`);
+    throw new Error(`필수 헤더 누락: ${missing.join(', ')}. 헤더행=${headerRow}, 헤더=${shortDump} (서버 콘솔 참조)`);
   }
 
   // 파싱 결과
@@ -156,43 +183,57 @@ exports.parseAndInsertOrdersFromExcel = async (
     insertedIds: [],
     overwriteByCreatedAtDay: false,
     overwriteDayKey: null,
+    profile,
   };
+
+  // 업로드 "일자"(KST) 미리 산출
+  const { startUTC, endUTC, key } = getUploadDayRangeUTC(new Date(), tzOffsetMin);
+  results.overwriteDayKey = key;
 
   for (let r = start; r < rows.length; r++) {
     const row = rows[r];
     if (!row || row.every(v => v === undefined || v === null || String(v).trim() === '')) continue;
 
     try {
-      const orderCompany = s(row[H.orderCompany]);
-      const requester    = H.requester !== undefined ? s(row[H.requester]) : '';
-      const orderDate    = d(row[H.orderDate]);
-      const quantity     = n(row[H.quantity]);
+      const quantity     = H.quantity !== undefined ? n(row[H.quantity]) : null;
+      const itemCode     = H.itemCode !== undefined ? s(row[H.itemCode]) : '';
+      const itemName     = H.itemName !== undefined ? s(row[H.itemName]) : '';
+      const category     = H.category !== undefined ? s(row[H.category]) : ''; // "구분"
+      const remark       = H.remark   !== undefined ? s(row[H.remark])   : '';
+      const status       = H.status   !== undefined ? mapStatus(row[H.status]) : 'WAIT';
+      const itemType     = H.itemType !== undefined ? s(row[H.itemType]) : '';
+      const carType      = H.carType  !== undefined ? s(row[H.carType])  : '';
 
-      const itemCode = H.itemCode !== undefined ? s(row[H.itemCode]) : '';
-      const itemName = H.itemName !== undefined ? s(row[H.itemName]) : '';
-      const category = H.category !== undefined ? s(row[H.category]) : '';
-      const remark   = H.remark   !== undefined ? s(row[H.remark])   : '';
-      const status   = H.status   !== undefined ? mapStatus(row[H.status]) : 'WAIT';
-      const itemType = H.itemType !== undefined ? s(row[H.itemType]) : '';
-      // [ADD carType]
-      const carType  = H.carType  !== undefined ? s(row[H.carType])  : '';
+      // 표준 필드(있으면 사용)
+      const orderCompany = H.orderCompany !== undefined ? s(row[H.orderCompany]) : '';
+      const orderDate    = H.orderDate    !== undefined ? d(row[H.orderDate])    : null;
+      const requester    = H.requester    !== undefined ? s(row[H.requester])    : '';
 
-      // validations
-      if (!itemName && !itemCode) throw new Error('품명(itemName) 또는 품번(itemCode) 필요');
-      if (!orderCompany) throw new Error('발주처(orderCompany) 없음');
-      if (!orderDate)    throw new Error('발주일(orderDate) 파싱 실패');
+      // === [REQ] 구분이 비어있으면 그 행만 스킵 ===
+      // - mobis-simple 프로필이거나, 실제로 구분 컬럼이 존재(H.category !== undefined)할 때만 스킵
+      if ((profile === 'mobis-simple' || H.category !== undefined) && !category) {
+        results.failed += 1;
+        results.errors.push({ row: r + 1, message: '스킵: 구분(category) 없음' });
+        continue;
+      }
+
+      // === 유효성 ===
+      if (!itemCode && !itemName) throw new Error('품번(itemCode) 또는 품명(itemName) 필요');
       if (!quantity || quantity <= 0) throw new Error('수량(quantity) 파싱 실패');
+
+      // === 기본값(모비스 간소 포맷 대응) ===
+      const safeOrderCompany = orderCompany || DEFAULT_COMPANY;
+      const safeOrderDate = orderDate || startUTC; // 업로드 당일 00:00(KST)을 UTC로 환산
 
       docs.push({
         itemName,
         itemCode,
         category,
         itemType,
-        // [ADD carType]
         carType,
-        orderCompany,
+        orderCompany: safeOrderCompany,
         quantity,
-        orderDate,
+        orderDate: safeOrderDate,
         requester: requester || '미지정',
         status,
         remark,
@@ -210,16 +251,13 @@ exports.parseAndInsertOrdersFromExcel = async (
     return results; // 모두 스킵/에러
   }
 
-  // 업로드 "일자"(타깃 타임존) → createdAt 덮어쓰기 범위 계산
-  const { startUTC, endUTC, key } = getUploadDayRangeUTC(new Date(), tzOffsetMin);
-  results.overwriteDayKey = key;
-
   // 트랜잭션
   const session = dryRun ? null : await mongoose.startSession();
   if (session) session.startTransaction();
 
   try {
     if (!dryRun) {
+      // 같은 "업로드 일자(KST)" 데이터 덮어쓰기
       const existingCount = await Order.countDocuments(
         { createdAt: { $gte: startUTC, $lt: endUTC } },
         { session }

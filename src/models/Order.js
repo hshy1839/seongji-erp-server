@@ -8,11 +8,11 @@ const orderSchema = new mongoose.Schema(
 
     // ✅ 한글 그대로 저장
     itemType: { type: String, default: '', trim: true },   // 공정/유형(엑셀 그대로)
-    itemName: { type: String, required: true, trim: true },// 품명
+    itemName: { type: String, trim: true },// 품명
     itemCode: { type: String, default: '', trim: true },   // 품번
     category: { type: String, default: '', trim: true },   // 대분류/카테고리
     carType: { type: String, default: '', trim: true }, 
-    orderCompany: { type: String, required: true, trim: true },
+    orderCompany: { type: String, trim: true },
     quantity: { type: Number, required: true, min: 1 },
     orderDate: { type: Date, required: true },
     requester: { type: String, required: true, default: '미지정', trim: true },

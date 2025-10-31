@@ -110,18 +110,29 @@ exports.deleteOrder = async (req, res, next) => {
 
 exports.uploadOrdersExcelController = async (req, res) => {
   try {
-    if (!req.file?.buffer) {
+    if (!req.file || !req.file.buffer) {
       return res.status(400).json({ ok: false, message: '파일이 없습니다.' });
     }
 
-    // ?dryRun=true 로 미리 검증만 가능
-    const dryRun = String(req.query.dryRun || 'false').toLowerCase() === 'true';
+    // ?dryRun=true 로 미리 검증만
+    const dryRun = String(req.query.dryRun ?? 'false').toLowerCase() === 'true';
 
-    const result = await parseAndInsertOrdersFromExcel(req.file.buffer, { dryRun });
+    // 한국 기본(KST=UTC+9=540분). 필요하면 ?tzOffsetMin=…로 덮어쓰기
+    const tzOffsetMinRaw = Number(req.query.tzOffsetMin);
+    const tzOffsetMin = Number.isFinite(tzOffsetMinRaw) ? tzOffsetMinRaw : 540;
 
-    return res.json({ ok: true, dryRun, ...result });
+    const result = await parseAndInsertOrdersFromExcel(req.file.buffer, {
+      dryRun,
+      tzOffsetMin,
+    });
+
+    return res.json({ ok: true, dryRun, tzOffsetMin, ...result });
   } catch (err) {
     console.error('uploadOrdersExcelController error:', err);
-    return res.status(500).json({ ok: false, message: err.message || '서버 오류' });
+    const message = err?.message || '서버 오류';
+
+    // 사용자가 고칠 수 있는 실수는 400으로 반환
+    const isUserError = /필수 헤더 누락|파싱 실패|엑셀 시트가 비어있습니다/i.test(message);
+    return res.status(isUserError ? 400 : 500).json({ ok: false, message });
   }
 };
