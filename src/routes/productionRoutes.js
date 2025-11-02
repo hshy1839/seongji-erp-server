@@ -1,19 +1,19 @@
-// routes/productionRoutes.js
-const router = require('express').Router();
-const ctrl = require('../controllers/productionController');
+// routes/production.routes.js
+const express = require('express');
 const multer = require('multer');
 const upload = multer();
+const ctrl = require('../controllers/productionController');
 
-// CRUD
+const router = express.Router();
+
 router.get('/', ctrl.list);
-router.get('/summary', ctrl.monthlySummary); // ?month=YYYY-MM
 router.get('/:id', ctrl.getOne);
 router.post('/', ctrl.create);
 router.put('/:id', ctrl.update);
+router.get('/summary', ctrl.summary);      
 router.delete('/:id', ctrl.remove);
 
-// 입고 라인 추가
-router.post('/:id/inbound', ctrl.addInbound);
-router.post('/upload', upload.single('file'), ctrl.uploadProductionExcelController);
+// 엑셀 업로드
+router.post('/import/excel', upload.single('file'), ctrl.uploadProductionExcelController);
 
 module.exports = router;
