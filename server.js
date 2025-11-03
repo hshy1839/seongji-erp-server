@@ -41,7 +41,7 @@ const noticeRoutes = require('./src/routes/noticeRoutes');
 const scheduleRoutes = require('./src/routes/scheduleRoutes');
 const userRoutes = require('./src/routes/userRoutes');
 const productionRoutes = require('./src/routes/productionRoutes');  
-
+const shortageRoutes = require('./src/routes/shortageRoutes');
 
 app.get('/ping', (req, res) => {
   res.status(200).send('pong');
@@ -58,6 +58,7 @@ app.use('/api', noticeRoutes);
 app.use('/api', scheduleRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/stocks', stockRoutes);
+app.use('/api/shortages', shortageRoutes);
 app.use((req, res) => {
   res.status(404).json({ message: 'Not Found' });
 });
