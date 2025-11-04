@@ -1,11 +1,6 @@
 const mongoose = require('mongoose');
 const { Schema } = mongoose;
 
-/**
- * 부족수량(ShortageItem) 모델
- * 필수: 구분(division), 자재(material), 자재품번(materialCode)
- * 선택: 자재업체(supplier), 입고수량(inQty), 재고수량(stockQty)
- */
 const ShortageItemSchema = new Schema(
   {
     division: { type: String, required: true, trim: true },      // 구분
@@ -14,6 +9,7 @@ const ShortageItemSchema = new Schema(
     supplier: { type: String, trim: true, default: '' },         // 자재업체
     inQty: { type: Number, default: 0 },                         // 입고수량
     stockQty: { type: Number, default: 0 },                      // 재고수량
+    systemStock: { type: Number, default: 0 },                   // ✅ 전산재고
   },
   {
     timestamps: true,
@@ -22,23 +18,24 @@ const ShortageItemSchema = new Schema(
   }
 );
 
-// ✅ 복합 고유키 설정: 구분 + 자재 + 자재품번
+// 복합 고유키
 ShortageItemSchema.index(
   { division: 1, material: 1, materialCode: 1 },
   { unique: true, name: 'uniq_division_material_code' }
 );
 
-// ✅ 업서트용 정적 메서드 (엑셀 업로드 시 바로 사용 가능)
-ShortageItemSchema.statics.upsertByKey = function (key, payload) {
+// 업서트
+ShortageItemSchema.statics.upsertByKey = function (key, payload = {}) {
   const filter = { ...key };
   const update = {
     $setOnInsert: { ...key },
     $set: {},
   };
 
-  if (payload?.supplier !== undefined) update.$set.supplier = payload.supplier;
-  if (payload?.inQty !== undefined) update.$set.inQty = payload.inQty;
-  if (payload?.stockQty !== undefined) update.$set.stockQty = payload.stockQty;
+  if (payload.supplier !== undefined) update.$set.supplier = payload.supplier;
+  if (payload.inQty !== undefined) update.$set.inQty = payload.inQty;
+  if (payload.stockQty !== undefined) update.$set.stockQty = payload.stockQty;
+  if (payload.systemStock !== undefined) update.$set.systemStock = payload.systemStock; // ✅ 여기
 
   return this.findOneAndUpdate(filter, update, { upsert: true, new: true });
 };

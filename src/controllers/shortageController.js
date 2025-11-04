@@ -80,27 +80,62 @@ exports.getShortage = async (req, res) => {
  */
 exports.createOrUpsertShortage = async (req, res) => {
   try {
-    const { division, material, materialCode, supplier, inQty, stockQty, upsert = true } = req.body;
+    const {
+      division,
+      material,
+      materialCode,
+      supplier,
+      inQty,
+      stockQty,
+      systemStock,        // ✅ 전산재고도 함께 받기
+      upsert = true,
+    } = req.body;
 
     if (!division || !material || !materialCode) {
-      return res.status(400).json({ ok: false, message: 'division, material, materialCode are required' });
+      return res.status(400).json({
+        ok: false,
+        message: 'division, material, materialCode are required',
+      });
     }
 
     if (upsert) {
       const doc = await ShortageItem.upsertByKey(
         { division, material, materialCode },
-        { supplier, inQty, stockQty }
+        {
+          supplier,
+          inQty,
+          stockQty,
+          systemStock,      // ✅ 업서트에도 포함
+        }
       );
-      return res.status(200).json({ ok: true, upserted: true, item: doc });
+      return res
+        .status(200)
+        .json({ ok: true, upserted: true, item: doc });
     } else {
-      const created = await ShortageItem.create({ division, material, materialCode, supplier, inQty, stockQty });
-      return res.status(201).json({ ok: true, upserted: false, item: created });
+      const created = await ShortageItem.create({
+        division,
+        material,
+        materialCode,
+        supplier,
+        inQty,
+        stockQty,
+        systemStock,        // ✅ 신규 생성에도 포함
+      });
+      return res
+        .status(201)
+        .json({ ok: true, upserted: false, item: created });
     }
   } catch (err) {
     if (err?.code === 11000) {
-      return res.status(409).json({ ok: false, message: 'Duplicate key', key: err.keyValue });
+      return res
+        .status(409)
+        .json({ ok: false, message: 'Duplicate key', key: err.keyValue });
     }
-    res.status(500).json({ ok: false, message: 'createOrUpsertShortage failed', error: err.message });
+    res.status(500).json({
+      ok: false,
+      message: 'createOrUpsertShortage failed',
+      error: err.message,
+    });
   }
 };
 
@@ -110,7 +145,15 @@ exports.createOrUpsertShortage = async (req, res) => {
  */
 exports.updateShortage = async (req, res) => {
   try {
-    const { supplier, inQty, stockQty, division, material, materialCode } = req.body;
+    const {
+      supplier,
+      inQty,
+      stockQty,
+      division,
+      material,
+      materialCode,
+      systemStock,            // ✅ 전산재고 추가
+    } = req.body;
 
     const toSet = {};
     if (supplier !== undefined) toSet.supplier = supplier;
@@ -119,21 +162,30 @@ exports.updateShortage = async (req, res) => {
     if (division !== undefined) toSet.division = division;
     if (material !== undefined) toSet.material = material;
     if (materialCode !== undefined) toSet.materialCode = materialCode;
+    if (systemStock !== undefined) toSet.systemStock = systemStock; // ✅ 여기
 
     const updated = await ShortageItem.findByIdAndUpdate(
       req.params.id,
       { $set: toSet },
       { new: true, runValidators: true }
     );
-    if (!updated) return res.status(404).json({ ok: false, message: 'Not found' });
+    if (!updated)
+      return res.status(404).json({ ok: false, message: 'Not found' });
     res.json({ ok: true, item: updated });
   } catch (err) {
     if (err?.code === 11000) {
-      return res.status(409).json({ ok: false, message: 'Duplicate key', key: err.keyValue });
+      return res
+        .status(409)
+        .json({ ok: false, message: 'Duplicate key', key: err.keyValue });
     }
-    res.status(500).json({ ok: false, message: 'updateShortage failed', error: err.message });
+    res.status(500).json({
+      ok: false,
+      message: 'updateShortage failed',
+      error: err.message,
+    });
   }
 };
+
 
 /**
  * 삭제
