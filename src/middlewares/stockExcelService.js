@@ -48,7 +48,7 @@ const HEADER_ALIASES = {
 
 // ===== sheet pick =====
 function pickSheet(workbook) {
-  const prefer = ['재고','stocks','stock','BOM','sill','SILL'];
+  const prefer = ['DATA','data','stock','BOM','sill','SILL'];
   for (const name of prefer) {
     if (workbook.Sheets[name]) return workbook.Sheets[name];
   }
