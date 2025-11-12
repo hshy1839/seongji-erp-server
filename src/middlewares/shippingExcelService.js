@@ -7,7 +7,14 @@ const Shipping = require('../models/Shipping');
 const toStr = v => (v == null ? '' : String(v));
 const s = v => toStr(v).trim();
 const norm = v => toStr(v).trim().replace(/\s+/g, '').replace(/[()]/g, '').toLowerCase();
-const safeIncludes = (hay, needle) => norm(hay).includes(norm(needle));
+
+// ⚠️ 빈 별칭 방지: needle이 비어있으면 false
+const safeIncludes = (hay, needle) => {
+  const H = norm(hay);
+  const N = norm(needle);
+  if (!N) return false;
+  return H.includes(N);
+};
 
 const n = v => {
   if (v === undefined || v === null || v === '') return null;
@@ -15,12 +22,12 @@ const n = v => {
   return Number.isFinite(num) ? num : null;
 };
 
+// 엑셀 날짜/문자열 날짜를 UTC 자정으로 변환
 const d = v => {
   if (!v && v !== 0) return null;
   if (typeof v === 'number') {
     const date = XLSX.SSF.parse_date_code(v);
     if (!date) return null;
-    // 숫자형(엑셀 날짜) → UTC 자정
     return new Date(Date.UTC(date.y, date.m - 1, date.d));
   }
   const txt = s(v).replace(/\./g, '-').replace(/\//g, '-');
@@ -34,8 +41,7 @@ const d = v => {
 const HEADER_ALIASES = {
   shippingCompany: [
     '납품처','출하처','거래처','납품회사','출하회사',
-    ,'업체','회사','고객사',
-    'shippingcompany'
+    '업체','회사','고객사','shippingcompany'
   ],
   shippingDate: [
     '출하일','출하일자','납품일자','납품일','납입일자',
@@ -43,8 +49,7 @@ const HEADER_ALIASES = {
     'date','shippingdate'
   ],
   quantity: [
-    '수량','납품수량','총납품수량','출하량','총출하량','총수량',
-    '총발주수량'
+    '수량','납품수량','총납품수량','출하량','총출하량','총수량','총발주수량'
   ],
   itemCode: ['품번','코드','품목코드','productcode','code','partnumber','oem','oemcode','완제품 품번'],
   itemName: ['품명','품목명','제품명','자재명','item','itemname','name'],
@@ -53,7 +58,6 @@ const HEADER_ALIASES = {
   status: ['상태','status'],
   remark: ['비고','메모','remark'],
   itemType: ['품목유형','itemtype','itemType','type','공정'],
-  // [ADD carType]
   carType: ['차종','cartype','차명','vehicle','model'],
 };
 
@@ -208,7 +212,7 @@ exports.parseAndInsertShippingsFromExcel = async (
   // 파싱 결과
   const docs = [];
   const results = {
-    totalRows: rows.length - start,
+    totalRows: Math.max(rows.length - start, 0),
     success: 0,
     failed: 0,
     errors: [],
@@ -229,12 +233,12 @@ exports.parseAndInsertShippingsFromExcel = async (
       const quantity       = H.quantity        !== undefined ? n(row[H.quantity])        : null;
 
       const itemCode = H.itemCode !== undefined ? s(row[H.itemCode]) : '';
-      const itemName = H.itemName !== undefined ? s(row[H.itemName]) : '';
+      const itemNameRaw = H.itemName !== undefined ? s(row[H.itemName]) : '';
+      const itemName = itemNameRaw || itemCode || ''; // 스키마 일관(품번만 있어도 허용)
       const category = H.category !== undefined ? s(row[H.category]) : '';
       const remark   = H.remark   !== undefined ? s(row[H.remark])   : '';
       const status   = H.status   !== undefined ? mapStatus(row[H.status]) : 'WAIT';
       const itemType = H.itemType !== undefined ? s(row[H.itemType]) : '';
-      // [ADD carType]
       const carType  = H.carType  !== undefined ? s(row[H.carType])  : '';
 
       // validations
@@ -249,7 +253,6 @@ exports.parseAndInsertShippingsFromExcel = async (
         itemCode,
         category,
         itemType,
-        // [ADD carType]
         carType,
         shippingCompany,
         quantity,
@@ -257,7 +260,6 @@ exports.parseAndInsertShippingsFromExcel = async (
         requester: requester || '미지정',
         status,
         remark,
-        item: null,
       });
 
       results.success += 1;
@@ -291,7 +293,8 @@ exports.parseAndInsertShippingsFromExcel = async (
         results.overwriteByCreatedAtDay = true;
       }
 
-      const created = await Shipping.insertMany(docs, { session });
+      // 부분 실패 허용: ordered:false
+      const created = await Shipping.insertMany(docs, { session, ordered: false });
       results.insertedIds = created.map(d => d._id);
     }
 
