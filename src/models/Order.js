@@ -13,7 +13,7 @@ const orderSchema = new mongoose.Schema(
     category: { type: String, default: '', trim: true },   // 대분류/카테고리
     carType: { type: String, default: '', trim: true }, 
     orderCompany: { type: String, trim: true },
-    quantity: { type: Number, required: true, min: 1 },
+    quantity: { type: Number, required: true},
     orderDate: { type: Date, required: true },
     requester: { type: String, required: true, default: '미지정', trim: true },
     status: { type: String, enum: ['WAIT', 'COMPLETE'], default: 'WAIT' },

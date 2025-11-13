@@ -1,96 +1,50 @@
-// controllers/shippingController.js
+// src/controllers/shippingController.js
 const mongoose = require('mongoose');
 const Shipping = require('../models/Shipping');
-// 경로 주의: middlewares 가 아니라 services 폴더
+const Order = require('../models/Order');
 const { parseAndInsertShippingsFromExcel } = require('../middlewares/shippingExcelService');
 
-/**
- * 유틸: 안전한 숫자/날짜 캐스팅
- */
-const toNum = (v) => {
-  if (v === undefined || v === null || v === '') return undefined;
-  const n = Number(String(v).replace(/[, ]/g, ''));
-  return Number.isFinite(n) ? n : undefined;
-};
-const toDate = (v) => {
-  if (!v || typeof v !== 'string') return undefined;
-  const d = new Date(v);
-  return Number.isNaN(d.getTime()) ? undefined : d;
-};
+// 공통: 주문 수량 증감 헬퍼
+async function adjustOrderQuantity({ division, itemCode, deltaQty, session }) {
+  if (!itemCode) return;
+
+  // 기본 조건: 품번
+  const query = { itemCode };
+
+  // 구분이 있으면 Order.category 로 매칭 (구분 = category)
+  if (division) {
+    query.category = division;
+  }
+
+  const updated = await Order.findOneAndUpdate(
+    query,
+    { $inc: { quantity: deltaQty } },   // deltaQty: -10 이면 10개 차감, +10 이면 복구
+    {
+      new: true,
+      session,
+    }
+  );
+
+  if (!updated) {
+    console.log('[adjustOrderQuantity] 매칭되는 발주 없음', query);
+  } else {
+    console.log(
+      '[adjustOrderQuantity] 발주 수량 변경',
+      query,
+      '→ quantity:',
+      updated.quantity
+    );
+  }
+}
 
 /**
  * GET /api/shippings
- * - 필터/검색/페이징/정렬 지원
- *   ?q=키워드(품명/품번/납품처 부분일치)
- *   ?company=납품처
- *   ?itemCode=품번
- *   ?status=WAIT|COMPLETE
- *   ?from=YYYY-MM-DD
- *   ?to=YYYY-MM-DD        (to 는 당일 23:59:59.999 까지 포함)
- *   ?page=1&limit=50
- *   ?sort=-shippingDate   (기본: -shippingDate)
+ * 전체 납품 목록
  */
 exports.getAllShippings = async (req, res, next) => {
   try {
-    const {
-      q,
-      company,
-      itemCode,
-      status,
-      from,
-      to,
-      page = 1,
-      limit = 50,
-      sort = '-shippingDate',
-    } = req.query;
-
-    const filter = {};
-
-    if (q) {
-      const regex = new RegExp(q.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
-      filter.$or = [
-        { itemName: regex },
-        { itemCode: regex },
-        { shippingCompany: regex },
-      ];
-    }
-
-    if (company) filter.shippingCompany = { $regex: new RegExp(company, 'i') };
-    if (itemCode) filter.itemCode = { $regex: new RegExp(itemCode, 'i') };
-    if (status && ['WAIT', 'COMPLETE'].includes(String(status).toUpperCase())) {
-      filter.status = String(status).toUpperCase();
-    }
-
-    // 날짜범위
-    const fromDt = toDate(from);
-    const toDt = toDate(to);
-    if (fromDt || toDt) {
-      filter.shippingDate = {};
-      if (fromDt) filter.shippingDate.$gte = fromDt;
-      if (toDt) {
-        // to 의 날짜 끝까지 포함
-        const end = new Date(toDt);
-        end.setHours(23, 59, 59, 999);
-        filter.shippingDate.$lte = end;
-      }
-    }
-
-    const pageNum = Math.max(parseInt(page, 10) || 1, 1);
-    const limitNum = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 1000);
-    const skip = (pageNum - 1) * limitNum;
-
-    const [rows, total] = await Promise.all([
-      Shipping.find(filter).sort(sort).skip(skip).limit(limitNum).lean(),
-      Shipping.countDocuments(filter),
-    ]);
-
-    return res.json({
-      ok: true,
-      total,
-      page: pageNum,
-      limit: limitNum,
-      rows,
-    });
+    const shippings = await Shipping.find().sort({ shippingDate: -1 });
+    res.json(shippings);
   } catch (err) {
     next(err);
   }
@@ -98,17 +52,15 @@ exports.getAllShippings = async (req, res, next) => {
 
 /**
  * GET /api/shippings/:id
+ * 단일 납품
  */
 exports.getShippingById = async (req, res, next) => {
   try {
-    const { id } = req.params;
-    if (!mongoose.Types.ObjectId.isValid(id))
-      return res.status(400).json({ ok: false, message: '잘못된 id 형식입니다.' });
-
-    // 스키마에 참조필드가 없으므로 populate 제거
-    const shipping = await Shipping.findById(id).lean();
-    if (!shipping) return res.status(404).json({ ok: false, message: 'Shipping not found' });
-    return res.json({ ok: true, data: shipping });
+    const shipping = await Shipping.findById(req.params.id);
+    if (!shipping) {
+      return res.status(404).json({ message: 'Shipping not found' });
+    }
+    res.json(shipping);
   } catch (err) {
     next(err);
   }
@@ -116,62 +68,144 @@ exports.getShippingById = async (req, res, next) => {
 
 /**
  * POST /api/shippings
- * body: { itemType, itemName?, itemCode, category, carType, shippingCompany*, quantity*, shippingDate*, requester?, status?, remark? }
+ * 납품 생성 + 해당 발주 수량 차감
  */
 exports.createShipping = async (req, res, next) => {
+  const session = await mongoose.startSession();
   try {
-    const body = { ...req.body };
+    session.startTransaction();
 
-    // 숫자/날짜 캐스팅
-    const q = toNum(body.quantity);
-    if (q !== undefined) body.quantity = q;
+    const payload = { ...req.body };
 
-    const sd = toDate(body.shippingDate);
-    if (sd) body.shippingDate = sd;
+    // 수량 숫자 변환
+    if (typeof payload.quantity === 'string') {
+      const q = Number(payload.quantity);
+      if (Number.isFinite(q)) payload.quantity = q;
+    }
 
-    // 요청자 자동 주입
-    if (req.user?.name) body.requester = req.user.name;
+    // 납품일 날짜 변환
+    if (typeof payload.shippingDate === 'string') {
+      const d = new Date(payload.shippingDate);
+      if (!Number.isNaN(d.getTime())) payload.shippingDate = d;
+    }
 
-    const doc = new Shipping(body);
-    const saved = await doc.save();
-    return res.status(201).json({ ok: true, data: saved });
+    // 요청자 자동 세팅 (로그인 유저가 있다면)
+    if (req.user?.name) {
+      payload.requester = req.user.name;
+    }
+
+    const shipping = new Shipping(payload);
+    const saved = await shipping.save({ session });
+
+    // 발주 quantity 차감 (구분+품번 기반)
+    await adjustOrderQuantity({
+      division: saved.division,           // Shipping.division
+      itemCode: saved.itemCode,
+      deltaQty: -saved.quantity,          // 납품한 만큼 빼기
+      session,
+    });
+
+    await session.commitTransaction();
+    session.endSession();
+
+    res.status(201).json(saved);
   } catch (err) {
+    if (session.inTransaction()) {
+      await session.abortTransaction();
+    }
+    session.endSession();
     next(err);
   }
 };
 
 /**
- * PATCH /api/shippings/:id
- * 부분수정 허용
+ * PUT/PATCH /api/shippings/:id
+ * 납품 수정 (수량/구분/품번 변경 시 발주 수량도 재조정)
  */
 exports.updateShipping = async (req, res) => {
+  const session = await mongoose.startSession();
   try {
-    const { id } = req.params;
-    if (!mongoose.Types.ObjectId.isValid(id))
+    session.startTransaction();
+
+    const id = req.params.id;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({ ok: false, message: '잘못된 id 형식입니다.' });
+    }
 
     const body = { ...req.body };
 
-    // 공백 제거/형변환
+    // 수량 변환
     if (body.quantity === '') delete body.quantity;
-    const q = toNum(body.quantity);
-    if (q !== undefined) body.quantity = q;
+    if (typeof body.quantity === 'string') {
+      const q = Number(body.quantity);
+      if (Number.isFinite(q)) body.quantity = q;
+    }
 
+    // 날짜 변환
     if (body.shippingDate === '') delete body.shippingDate;
-    const sd = typeof body.shippingDate === 'string' ? toDate(body.shippingDate) : undefined;
-    if (sd) body.shippingDate = sd;
+    if (typeof body.shippingDate === 'string') {
+      const d = new Date(body.shippingDate);
+      if (!Number.isNaN(d.getTime())) body.shippingDate = d;
+    }
 
-    if (req.user?.name) body.requester = req.user.name;
+    // 요청자
+    if (req.user?.name) {
+      body.requester = req.user.name;
+    }
 
+    // 기존 값 조회 (차이 계산용)
+    const before = await Shipping.findById(id).session(session);
+    if (!before) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({ ok: false, message: 'Shipping not found' });
+    }
+
+    const prevDivision = before.division;
+    const prevItemCode = before.itemCode;
+    const prevCompany = before.shippingCompany;
+    const prevQty = before.quantity;
+
+    // 실제 업데이트
     const doc = await Shipping.findByIdAndUpdate(id, body, {
       new: true,
       runValidators: true,
-    }).lean();
+      session,
+    });
 
-    if (!doc) return res.status(404).json({ ok: false, message: 'Shipping not found' });
+    // quantity/구분/품번/업체가 바뀌었으면 발주 수량 재조정
+    const newDivision = doc.division;
+    const newItemCode = doc.itemCode;
+    const newCompany = doc.shippingCompany;
+    const newQty = doc.quantity;
 
-    return res.json({ ok: true, data: doc });
+    // 이전 발주에서 롤백 (구분/품번/업체 기준)
+    await adjustOrderQuantity({
+      division: prevDivision,
+      itemCode: prevItemCode,
+      deltaQty: prevQty, // 이전에 뺐던 만큼 다시 더해줌
+      session,
+    });
+
+    // 새 발주에서 다시 차감
+    await adjustOrderQuantity({
+      division: newDivision,
+      itemCode: newItemCode,
+      deltaQty: -newQty,
+      session,
+    });
+
+    await session.commitTransaction();
+    session.endSession();
+
+    return res.json(doc);
   } catch (error) {
+    if (session.inTransaction()) {
+      await session.abortTransaction();
+    }
+    session.endSession();
+
     console.error('[updateShipping ERROR]', error);
     if (error.name === 'ValidationError') {
       return res.status(400).json({
@@ -190,34 +224,70 @@ exports.updateShipping = async (req, res) => {
         message: '값 형식이 올바르지 않습니다.',
       });
     }
+    if (error.name === 'StrictPopulateError') {
+      return res.status(400).json({
+        ok: false,
+        type: 'StrictPopulateError',
+        message: error.message,
+        path: error.path,
+      });
+    }
     return res.status(500).json({ ok: false, message: 'Internal Server Error' });
   }
 };
 
 /**
  * DELETE /api/shippings/:id
+ * 납품 삭제 + 해당 발주 수량 되돌리기
  */
 exports.deleteShipping = async (req, res, next) => {
+  const session = await mongoose.startSession();
   try {
-    const { id } = req.params;
-    if (!mongoose.Types.ObjectId.isValid(id))
-      return res.status(400).json({ ok: false, message: '잘못된 id 형식입니다.' });
+    session.startTransaction();
 
-    const deleted = await Shipping.findByIdAndDelete(id);
-    if (!deleted) return res.status(404).json({ ok: false, message: 'Shipping not found' });
-    return res.json({ ok: true, message: 'Shipping deleted' });
-  } catch (error) {
-    next(error);
+    const id = req.params.id;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({ ok: false, message: '잘못된 id 형식입니다.' });
+    }
+
+    // 삭제할 납품 먼저 조회
+    const shipping = await Shipping.findById(id).session(session);
+    if (!shipping) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({ ok: false, message: 'Shipping not found' });
+    }
+
+    // 발주 수량 롤백 (구분+품번 기준)
+    await adjustOrderQuantity({
+      division: shipping.division,
+      itemCode: shipping.itemCode,
+      deltaQty: shipping.quantity, // 삭제되니까 다시 되돌려 더해준다
+      session,
+    });
+
+    // 실제 삭제
+    await Shipping.findByIdAndDelete(id, { session });
+
+    await session.commitTransaction();
+    session.endSession();
+
+    res.json({ ok: true, message: 'Shipping deleted', shippingId: id });
+  } catch (err) {
+    if (session.inTransaction()) {
+      await session.abortTransaction();
+    }
+    session.endSession();
+    next(err);
   }
 };
 
 /**
  * POST /api/shippings/upload-excel
- * - multer.single('file') 로 파일 수신
- * - 옵션:
- *   ?dryRun=true|false
- *   ?tzOffsetMin=540     (기본 KST)
- *   ?defaultShippingDate=YYYY-MM-DD (엑셀 날짜 누락시 일괄 적용)
+ * 엑셀 업로드 (기존 parseAndInsertShippingsFromExcel 사용)
  */
 exports.uploadShippingsExcelController = async (req, res) => {
   try {
@@ -226,15 +296,11 @@ exports.uploadShippingsExcelController = async (req, res) => {
     }
 
     const dryRun = String(req.query.dryRun || 'false').toLowerCase() === 'true';
-    const tzOffsetMin = Number.isFinite(Number(req.query.tzOffsetMin))
-      ? Number(req.query.tzOffsetMin)
-      : 540;
-    const defaultShippingDate = req.query.defaultShippingDate || null;
+    const tzOffsetMin = Number(req.query.tzOffsetMin ?? 540) || 540;
 
     const result = await parseAndInsertShippingsFromExcel(req.file.buffer, {
       dryRun,
       tzOffsetMin,
-      defaultShippingDate,
     });
 
     return res.json({ ok: true, dryRun, ...result });

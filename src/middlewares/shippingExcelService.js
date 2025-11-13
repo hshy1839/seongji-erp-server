@@ -6,7 +6,12 @@ const Shipping = require('../models/Shipping');
 // ===== utils =====
 const toStr = v => (v == null ? '' : String(v));
 const s = v => toStr(v).trim();
-const norm = v => toStr(v).trim().replace(/\s+/g, '').replace(/[()]/g, '').toLowerCase();
+const norm = v =>
+  toStr(v)
+    .trim()
+    .replace(/\s+/g, '')
+    .replace(/[()]/g, '')
+    .toLowerCase();
 
 // ⚠️ 빈 별칭 방지: needle이 비어있으면 false
 const safeIncludes = (hay, needle) => {
@@ -34,71 +39,131 @@ const d = v => {
   const dt = new Date(txt);
   return isNaN(dt.getTime())
     ? null
-    : new Date(Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate()));
+    : new Date(
+        Date.UTC(
+          dt.getUTCFullYear(),
+          dt.getUTCMonth(),
+          dt.getUTCDate()
+        )
+      );
 };
 
 // ===== header aliases (Shipping 전용) =====
 const HEADER_ALIASES = {
   shippingCompany: [
-    '납품처','출하처','거래처','납품회사','출하회사',
-    '업체','회사','고객사','shippingcompany'
+    '납품처',
+    '출하처',
+    '거래처',
+    '납품회사',
+    '출하회사',
+    '업체',
+    '회사',
+    '고객사',
+    'shippingcompany',
   ],
   shippingDate: [
-    '출하일','출하일자','납품일자','납품일','납입일자',
-    '주문일','일자','날짜','발주일자',
-    'date','shippingdate'
+    '출하일',
+    '출하일자',
+    '납품일자',
+    '납품일',
+    '납입일자',
+    '주문일',
+    '일자',
+    '날짜',
+    '발주일자',
+    'date',
+    'shippingdate',
   ],
   quantity: [
-    '수량','납품수량','총납품수량','출하량','총출하량','총수량','총발주수량'
+    '수량',
+    '납품수량',
+    '총납품수량',
+    '출하량',
+    '총출하량',
+    '총수량',
+    '총발주수량',
   ],
-  itemCode: ['품번','코드','품목코드','productcode','code','partnumber','oem','oemcode','완제품 품번'],
-  itemName: ['품명','품목명','제품명','자재명','item','itemname','name'],
-  category: ['대분류','카테고리','분류','category'],
-  requester: ['요청자','담당자','requester'],
-  status: ['상태','status'],
-  remark: ['비고','메모','remark'],
-  itemType: ['품목유형','itemtype','itemType','type','공정'],
-  carType: ['차종','cartype','차명','vehicle','model'],
+  itemCode: [
+    '품번',
+    '코드',
+    '품목코드',
+    'productcode',
+    'code',
+    'partnumber',
+    'oem',
+    'oemcode',
+    '완제품 품번',
+  ],
+  itemName: ['품명', '품목명', '제품명', '자재명', 'item', 'itemname', 'name'],
+  category: ['대분류', '카테고리', '분류', 'category'],
+  requester: ['요청자', '담당자', 'requester'],
+  status: ['상태', 'status'],
+  remark: ['비고', '메모', 'remark'],
+  itemType: ['품목유형', 'itemtype', 'itemType', 'type', '공정'],
+  carType: ['차종', 'cartype', '차명', 'vehicle', 'model'],
+
+  // 🔹 구분 매핑 (출하수량 시트의 "구분" 컬럼)
+  division: ['구분', '출하구분', 'division'],
 };
 
 // ===== status map =====
-const mapStatus = v => (/(완료|complete)/i.test(s(v)) ? 'COMPLETE' : 'WAIT');
+const mapStatus = v =>
+  /(완료|complete)/i.test(s(v)) ? 'COMPLETE' : 'WAIT';
 
 // ===== header row detection & index =====
-const MUST = ['shippingCompany','shippingDate','quantity'];
+const MUST = ['shippingCompany', 'shippingDate', 'quantity'];
 
 function findHeaderRow(rows) {
   const maxScan = Math.min(rows.length, 30);
-  let bestIdx = 0, bestHits = -1;
+  let bestIdx = 0,
+    bestHits = -1;
 
   for (let r = 0; r < maxScan; r++) {
     const header = Array.isArray(rows[r]) ? rows[r].map(toStr) : [];
     const hits = MUST.reduce((acc, key) => {
       const aliases = HEADER_ALIASES[key] || [];
-      const matched = aliases.some(a => header.some(h => safeIncludes(h, a)));
+      const matched = aliases.some(a =>
+        header.some(h => safeIncludes(h, a))
+      );
       return acc + (matched ? 1 : 0);
     }, 0);
 
     if (hits >= 2) return r; // 유효 헤더
-    if (hits > bestHits) { bestHits = hits; bestIdx = r; }
+    if (hits > bestHits) {
+      bestHits = hits;
+      bestIdx = r;
+    }
   }
   return bestIdx;
 }
 
 function buildHeaderIndex(headerRow) {
   const idx = {};
-  const headerNorm = (Array.isArray(headerRow) ? headerRow : []).map(v => norm(v));
+  const headerNorm = (Array.isArray(headerRow) ? headerRow : []).map(v =>
+    norm(v)
+  );
   Object.entries(HEADER_ALIASES).forEach(([key, aliases = []]) => {
-    const found = headerNorm.findIndex(h => aliases.some(lbl => safeIncludes(h, lbl)));
+    const found = headerNorm.findIndex(h =>
+      aliases.some(lbl => safeIncludes(h, lbl))
+    );
     if (found >= 0) idx[key] = found;
   });
   return idx;
 }
 
 // ===== debug header =====
-function debugHeaderInfo({ rows, headerRowIdx, headerRaw, headerNorm, H, aliases }) {
+function debugHeaderInfo({
+  rows,
+  headerRowIdx,
+  headerRaw,
+  headerNorm,
+  H,
+  aliases,
+}) {
   const lines = [];
-  lines.push('=== [Excel Header Debug] =================================');
+  lines.push(
+    '=== [Excel Header Debug] ================================='
+  );
   lines.push(`- headerRowIdx: ${headerRowIdx}`);
   lines.push(`- headerRaw   : ${JSON.stringify(headerRaw)}`);
   lines.push(`- headerNorm  : ${JSON.stringify(headerNorm)}`);
@@ -107,16 +172,31 @@ function debugHeaderInfo({ rows, headerRowIdx, headerRaw, headerNorm, H, aliases
     const foundIndex = H[key];
     if (foundIndex !== undefined) {
       const matchedAlias =
-        aliasList.find(a => headerNorm.includes(norm(a))) || '(norm-match)';
-      lines.push(`  · ${key.padEnd(16)}: ${String(foundIndex).padStart(2)} / "${matchedAlias}"`);
+        aliasList.find(a => headerNorm.includes(norm(a))) ||
+        '(norm-match)';
+      lines.push(
+        `  · ${key.padEnd(16)}: ${String(foundIndex).padStart(
+          2
+        )} / "${matchedAlias}"`
+      );
     } else {
-      lines.push(`  · ${key.padEnd(16)}: (NOT FOUND)  tried=${JSON.stringify(aliasList)}`);
+      lines.push(
+        `  · ${key.padEnd(
+          16
+        )}: (NOT FOUND)  tried=${JSON.stringify(aliasList)}`
+      );
     }
   });
-  const preview = rows.slice(headerRowIdx + 1, headerRowIdx + 4).map(r => (r || []).map(s));
+  const preview = rows
+    .slice(headerRowIdx + 1, headerRowIdx + 4)
+    .map(r => (r || []).map(s));
   lines.push('- first data rows (preview up to 3):');
-  preview.forEach((r, i) => lines.push(`  [${i}] ${JSON.stringify(r)}`));
-  lines.push('===========================================================');
+  preview.forEach((r, i) =>
+    lines.push(`  [${i}] ${JSON.stringify(r)}`)
+  );
+  lines.push(
+    '==========================================================='
+  );
   return lines.join('\n');
 }
 
@@ -132,7 +212,10 @@ function pickSheetSmart(workbook) {
   for (const name of names) {
     const ws = workbook.Sheets[name];
     if (!ws) continue;
-    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true });
+    const rows = XLSX.utils.sheet_to_json(ws, {
+      header: 1,
+      raw: true,
+    });
     if (!rows.length) continue;
 
     const idx = findHeaderRow(rows);
@@ -140,7 +223,9 @@ function pickSheetSmart(workbook) {
 
     const hit = MUST.reduce((acc, key) => {
       const aliases = HEADER_ALIASES[key] || [];
-      const matched = aliases.some(a => header.some(h => safeIncludes(h, a)));
+      const matched = aliases.some(a =>
+        header.some(h => safeIncludes(h, a))
+      );
       return acc + (matched ? 1 : 0);
     }, 0);
 
@@ -161,8 +246,12 @@ function getUploadDayRangeUTC(now = new Date(), tzOffsetMin = 540) {
   const ddd = localNow.getUTCDate();
   const startLocal = Date.UTC(y, m, ddd);
   const startUTC = new Date(startLocal - offsetMs);
-  const endUTC = new Date(startUTC.getTime() + 24 * 60 * 60 * 1000);
-  const key = `${y}-${String(m + 1).padStart(2, '0')}-${String(ddd).padStart(2, '0')}`;
+  const endUTC = new Date(
+    startUTC.getTime() + 24 * 60 * 60 * 1000
+  );
+  const key = `${y}-${String(m + 1).padStart(2, '0')}-${String(
+    ddd
+  ).padStart(2, '0')}`;
   return { startUTC, endUTC, key };
 }
 
@@ -177,35 +266,61 @@ function getUploadDayRangeUTC(now = new Date(), tzOffsetMin = 540) {
  */
 exports.parseAndInsertShippingsFromExcel = async (
   fileBuffer,
-  { dryRun = false, tzOffsetMin = 540, defaultShippingDate = null } = {}
+  {
+    dryRun = false,
+    tzOffsetMin = 540,
+    defaultShippingDate = null,
+  } = {}
 ) => {
   const wb = XLSX.read(fileBuffer, { type: 'buffer' });
   const ws = pickSheetSmart(wb);
   if (!ws) throw new Error('엑셀 통합문서에 시트가 없습니다.');
 
-  const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true });
-  if (!rows.length) throw new Error('엑셀 시트가 비어있습니다.');
+  const rows = XLSX.utils.sheet_to_json(ws, {
+    header: 1,
+    raw: true,
+  });
+  if (!rows.length)
+    throw new Error('엑셀 시트가 비어있습니다.');
 
   // header
   const headerRowIdx = findHeaderRow(rows);
-  const headerRaw  = (rows[headerRowIdx] || []).map(v => s(v));
+  const headerRaw = (rows[headerRowIdx] || []).map(v => s(v));
   const headerNorm = headerRaw.map(norm);
   const H = buildHeaderIndex(headerRaw);
   const start = headerRowIdx + 1;
 
   // required headers
-  const need = ['shippingCompany','shippingDate','quantity'];
+  const need = ['shippingCompany', 'shippingDate', 'quantity'];
   const missing = need.filter(k => H[k] === undefined);
-  const defaultDateObj = defaultShippingDate ? d(defaultShippingDate) : null;
+  const defaultDateObj = defaultShippingDate
+    ? d(defaultShippingDate)
+    : null;
 
   if (missing.length) {
-    const onlyDateMissing = (missing.length === 1 && missing[0] === 'shippingDate' && !!defaultDateObj);
+    const onlyDateMissing =
+      missing.length === 1 &&
+      missing[0] === 'shippingDate' &&
+      !!defaultDateObj;
     if (!onlyDateMissing) {
       console.error(
-        debugHeaderInfo({ rows, headerRowIdx, headerRaw, headerNorm, H, aliases: HEADER_ALIASES })
+        debugHeaderInfo({
+          rows,
+          headerRowIdx,
+          headerRaw,
+          headerNorm,
+          H,
+          aliases: HEADER_ALIASES,
+        })
       );
-      const shortDump = headerRaw.map(h => `[${h}]`).join(', ');
-      throw new Error(`필수 헤더 누락: ${missing.join(', ')}. 헤더행=${headerRowIdx}, 헤더=${shortDump} (서버 콘솔 참조)`);
+      const shortDump = headerRaw
+        .map(h => `[${h}]`)
+        .join(', ');
+      throw new Error(
+        `필수 헤더 누락: ${missing.join(
+          ', '
+        )}. 헤더행=${headerRowIdx}, 헤더=${shortDump} (서버 콘솔 참조)`
+      );
     }
   }
 
@@ -224,29 +339,69 @@ exports.parseAndInsertShippingsFromExcel = async (
 
   for (let r = start; r < rows.length; r++) {
     const row = rows[r];
-    if (!row || row.every(v => v === undefined || v === null || String(v).trim() === '')) continue;
+    if (
+      !row ||
+      row.every(
+        v =>
+          v === undefined ||
+          v === null ||
+          String(v).trim() === ''
+      )
+    )
+      continue;
 
     try {
-      const shippingCompany = H.shippingCompany !== undefined ? s(row[H.shippingCompany]) : '';
-      const requester      = H.requester       !== undefined ? s(row[H.requester])       : '';
-      const shippingDate   = H.shippingDate    !== undefined ? d(row[H.shippingDate])    : null;
-      const quantity       = H.quantity        !== undefined ? n(row[H.quantity])        : null;
+      const shippingCompany =
+        H.shippingCompany !== undefined
+          ? s(row[H.shippingCompany])
+          : '';
+      const requester =
+        H.requester !== undefined ? s(row[H.requester]) : '';
+      const shippingDate =
+        H.shippingDate !== undefined
+          ? d(row[H.shippingDate])
+          : null;
+      const quantity =
+        H.quantity !== undefined ? n(row[H.quantity]) : null;
 
-      const itemCode = H.itemCode !== undefined ? s(row[H.itemCode]) : '';
-      const itemNameRaw = H.itemName !== undefined ? s(row[H.itemName]) : '';
+      const itemCode =
+        H.itemCode !== undefined ? s(row[H.itemCode]) : '';
+      const itemNameRaw =
+        H.itemName !== undefined ? s(row[H.itemName]) : '';
       const itemName = itemNameRaw || itemCode || ''; // 스키마 일관(품번만 있어도 허용)
-      const category = H.category !== undefined ? s(row[H.category]) : '';
-      const remark   = H.remark   !== undefined ? s(row[H.remark])   : '';
-      const status   = H.status   !== undefined ? mapStatus(row[H.status]) : 'WAIT';
-      const itemType = H.itemType !== undefined ? s(row[H.itemType]) : '';
-      const carType  = H.carType  !== undefined ? s(row[H.carType])  : '';
+      const category =
+        H.category !== undefined ? s(row[H.category]) : '';
+      const remark =
+        H.remark !== undefined ? s(row[H.remark]) : '';
+      const status =
+        H.status !== undefined
+          ? mapStatus(row[H.status])
+          : 'WAIT';
+      const itemType =
+        H.itemType !== undefined ? s(row[H.itemType]) : '';
+      const carType =
+        H.carType !== undefined ? s(row[H.carType]) : '';
+
+      // 🔹 division 파싱 (구분)
+      const division =
+        H.division !== undefined ? s(row[H.division]) : '';
 
       // validations
-      if (!itemName && !itemCode) throw new Error('품명(itemName) 또는 품번(itemCode) 필요');
-      if (!shippingCompany) throw new Error('납품처(shippingCompany) 없음');
+      if (!itemName && !itemCode)
+        throw new Error(
+          '품명(itemName) 또는 품번(itemCode) 필요'
+        );
+      if (!shippingCompany)
+        throw new Error(
+          '납품처(shippingCompany) 없음'
+        );
       const finalDate = shippingDate || defaultDateObj;
-      if (!finalDate) throw new Error('납품일(shippingDate) 파싱 실패 (defaultShippingDate 미제공)');
-      if (!quantity || quantity <= 0) throw new Error('수량(quantity) 파싱 실패');
+      if (!finalDate)
+        throw new Error(
+          '납품일(shippingDate) 파싱 실패 (defaultShippingDate 미제공)'
+        );
+      if (!quantity || quantity <= 0)
+        throw new Error('수량(quantity) 파싱 실패');
 
       docs.push({
         itemName,
@@ -254,6 +409,7 @@ exports.parseAndInsertShippingsFromExcel = async (
         category,
         itemType,
         carType,
+        division, // 🔹 여기서 DB로 보냄
         shippingCompany,
         quantity,
         shippingDate: finalDate,
@@ -265,7 +421,10 @@ exports.parseAndInsertShippingsFromExcel = async (
       results.success += 1;
     } catch (rowErr) {
       results.failed += 1;
-      results.errors.push({ row: r + 1, message: rowErr.message });
+      results.errors.push({
+        row: r + 1,
+        message: rowErr.message,
+      });
     }
   }
 
@@ -274,11 +433,14 @@ exports.parseAndInsertShippingsFromExcel = async (
   }
 
   // 업로드 "일자"(타깃 타임존) → createdAt 덮어쓰기 범위 계산
-  const { startUTC, endUTC, key } = getUploadDayRangeUTC(new Date(), tzOffsetMin);
+  const { startUTC, endUTC, key } =
+    getUploadDayRangeUTC(new Date(), tzOffsetMin);
   results.overwriteDayKey = key;
 
   // 트랜잭션
-  const session = dryRun ? null : await mongoose.startSession();
+  const session = dryRun
+    ? null
+    : await mongoose.startSession();
   if (session) session.startTransaction();
 
   try {
@@ -289,12 +451,18 @@ exports.parseAndInsertShippingsFromExcel = async (
       );
 
       if (existingCount > 0) {
-        await Shipping.deleteMany({ createdAt: { $gte: startUTC, $lt: endUTC } }, { session });
+        await Shipping.deleteMany(
+          { createdAt: { $gte: startUTC, $lt: endUTC } },
+          { session }
+        );
         results.overwriteByCreatedAtDay = true;
       }
 
       // 부분 실패 허용: ordered:false
-      const created = await Shipping.insertMany(docs, { session, ordered: false });
+      const created = await Shipping.insertMany(docs, {
+        session,
+        ordered: false,
+      });
       results.insertedIds = created.map(d => d._id);
     }
 

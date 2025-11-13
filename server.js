@@ -49,7 +49,7 @@ app.get('/ping', (req, res) => {
 app.use('/api', productRoutes);
 app.use('/api', orderRoutes);
 app.use('/api', deliveryRoutes);
-app.use('/api', shippingRoutes);
+app.use('/api/shippings', shippingRoutes);
 app.use('/api/production', productionRoutes); 
 app.use('/api', companyRoutes);
 app.use('/api', packagingRoutes);
