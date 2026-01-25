@@ -4,13 +4,13 @@ const mongoose = require('mongoose');
 const shippingSchema = new mongoose.Schema(
   {
     itemType:   { type: String, default: '', trim: true },
-    itemName:   { type: String, required: true, trim: true },
-    itemCode:   { type: String, default: '', trim: true },
+    itemName:   { type: String,  trim: true },
+    itemCode:   { type: String, default: '', required: true, trim: true },
     category:   { type: String, default: '', trim: true }, // 대분류/카테고리
     carType:    { type: String, default: '', trim: true },
     division:   { type: String, default: '', trim: true }, // 구분(내수/수출 등)
 
-    shippingCompany: { type: String, required: true, trim: true },
+    shippingCompany: { type: String, trim: true },
     quantity:        { type: Number, required: true, min: 1 },
     shippingDate:    { type: Date, required: true },
     requester:       { type: String, default: '미지정', trim: true },
